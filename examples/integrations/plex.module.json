@@ -1,0 +1,29 @@
+{
+  "id": "media",
+  "type": "plex",
+  "name": "My media",
+  "enabled": true,
+  "url": "http://plex.example.invalid:32400",
+  "token_secret": "plex_token",
+  "timeout_seconds": 4,
+  "controls_enabled": false,
+  "allow_terminate_streams": false,
+  "seerr": {
+    "url": "http://seerr.example.invalid:5055",
+    "api_key_secret": "seerr_key",
+    "requests_enabled": false,
+    "approvals_enabled": false,
+    "destinations": {
+      "movies-ssd": {
+        "rootFolder": "/media/movies",
+        "serverId": 0,
+        "profileId": 1
+      },
+      "shows-ssd": {
+        "rootFolder": "/media/shows",
+        "serverId": 0,
+        "profileId": 1
+      }
+    }
+  }
+}

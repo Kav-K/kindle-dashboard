@@ -1,0 +1,10 @@
+# Change this DNS name. Caddy obtains and renews HTTPS certificates.
+# Never publish the hub's cleartext port directly to the Internet.
+dashboard.example.net {
+    handle /kindle-dashboard* {
+        reverse_proxy 127.0.0.1:8787 {
+            header_up Host dashboard.example.net
+        }
+    }
+    respond "Not found" 404
+}

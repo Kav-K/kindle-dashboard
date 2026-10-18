@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Inkboard</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#17243b;background:#f0f4fb;color-scheme:light}*{box-sizing:border-box}body{margin:0}header{padding:26px max(20px,calc((100vw - 1180px)/2));background:#135eee;color:white}h1{margin:0;font-size:32px}header p{opacity:.85;margin:8px 0}main{max-width:1220px;padding:20px;margin:auto}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.login,.card{background:white;border:1px solid #dce3ee;border-radius:18px;padding:22px;margin:0 0 18px;box-shadow:0 3px 14px #13346508}.login input{max-width:100%}input,select,button{font:inherit;padding:11px 14px;border:1px solid #bdcbdc;border-radius:9px;background:white}button{cursor:pointer;color:#153f8c}button.primary{background:#135eee;color:white;border-color:#135eee}button:disabled{opacity:.45;cursor:default}.badge{background:#e0f4e9;color:#096638;padding:5px 10px;border-radius:8px;font-size:13px;font-weight:700}.bad{background:#ffe6e9;color:#a31f39}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}.muted{color:#61738a;font-size:14px}.large{font-size:48px;font-weight:750;color:#135eee}progress{width:100%;height:15px;accent-color:#135eee}h2{margin:0 0 16px}h3{margin:0}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;padding:10px;border-bottom:1px solid #e6ebf3}.message{white-space:pre-wrap;border-left:4px solid #135eee;padding:12px;background:#e8f0ff;margin-bottom:18px}footer{font-size:13px;color:#61738a;padding:16px}.actions{margin-top:16px}.camera{width:100%;border-radius:9px}.tabs{margin:16px 0}.tab.active{background:#17243b;color:white}details{margin-top:14px}summary{cursor:pointer}#controls{display:none}.hidden{display:none!important}a{color:#1859bc}label{font-size:14px}.session{margin:16px 0;padding:16px;background:#f5f7fc;border-radius:12px}
+</style></head><body><header><h1 id="name">Inkboard</h1><p>Your printers, media and services, in one private dashboard.</p></header><main>
+<section class="login"><div class="row"><label>Reader token <input id="reader" type="password" autocomplete="off" placeholder="Paste your private reader token"></label><button id="connect" class="primary">Connect</button><button id="disconnect">Disconnect</button></div><details><summary>Operator controls</summary><p class="muted">Use your separate controller token to enable configured actions. Tokens stay in this page's memory and are cleared when you disconnect or close it.</p><input id="controller" type="password" autocomplete="off" placeholder="Controller token"><button id="enable">Enable controls</button></details></section>
+<div id="message" class="message">Connect with a reader token. No data or credentials are stored in this browser.</div><div id="health" class="muted"></div><nav id="tabs" class="row tabs"></nav><section id="content"></section><section id="workspaces" aria-label="Media requests"></section><footer>Inkboard · Refreshes every 15 seconds. Cached source observations are timestamped; stale sources disable controls. Remote access requires your own HTTPS deployment.</footer></main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);const base=location.pathname.startsWith('/kindle-dashboard')?'/kindle-dashboard':'';
+let reader='',controller='',tab='all',model=null,timer=null,lastSuccess=null,activeCommands=0,messageKind='initial',refreshFailed=false;
+const mediaWorkspaces=new Map();
+function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n}
+function notice(text,kind='user'){messageKind=kind;$('message').textContent=text}
+async function api(path,method='GET',data=null){const token=method==='GET'?reader:controller;if(!token)throw Error(method==='GET'?'Connect with a reader token.':'Enable operator controls with a controller token first.');const response=await fetch(base+path,{method,headers:{Authorization:'Bearer '+token,...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined,cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(12000)});const result=await response.json();if(!response.ok)throw Error(result.error||'Request unavailable');return result}
+function button(text,fn,parent,enabled=true){const b=el('button',text);b.disabled=!enabled;b.addEventListener('click',fn);parent.append(b);return b}
+function label(parent,name,value){const p=el('p');p.append(el('strong',name+': '),document.createTextNode(String(value??'Not reported')));parent.append(p)}
+function healthy(m){return m.available&&!m.stale}
+function currentModule(id){return model?.modules.find(m=>m.id===id)}
+function can(m,action){m=currentModule(m.id);return Boolean(controller)&&Boolean(m)&&!refreshFailed&&lastSuccess!==null&&Date.now()-lastSuccess.getTime()<=45000&&healthy(m)&&(m.capabilities||[]).includes(action)}
+async function command(m,action,parameters={},printerId=null){
+ const latest=currentModule(m.id);
+ if(!latest||!can(latest,action)){notice('This source or action is no longer available. Refresh its reported state before submitting.','command');return null}
+ const id=crypto.randomUUID();
+ // Bind to the print the operator actually saw, never a newer print from a background poll.
+ if(printerId&&['pause','resume','stop','speed'].includes(action)){const p=(m.details?.printers||[]).find(p=>p.id===printerId);parameters={...parameters,job_identity:p?.job_identity}}
+ const payload={request_id:id,action,parameters,...(printerId?{printer_id:printerId}:{module_id:m.id})};
+ activeCommands++;notice('Sending '+action+'… Request '+id,'command');
+ try{await api('/api/v1/modules/commands','POST',payload);for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,800));const receipt=await api('/api/v1/commands/'+id);if(!['queued','claimed'].includes(receipt.state)){notice(receipt.state==='accepted'?'Confirmed by source.':receipt.detail,'command');if(!['seerr_search','seerr_tv'].includes(action))await refresh({background:true});return receipt}}notice('Outcome uncertain. Check the actual source before sending another request. Request '+id,'command')}
+ catch(e){notice('Outcome may be uncertain: '+e.message+'. Request '+id+'. Inspect the source before trying again.','command')}
+ finally{activeCommands--;syncMediaWorkspaces()}
+ return null
+}
+function header(m,parent){const row=el('div',undefined,'row');row.append(el('h2',m.name),el('span',healthy(m)?(m.details?.degraded?'PARTIAL':'READY'):'NEEDS ATTENTION','badge'+(healthy(m)?'':' bad')));parent.append(row,el('p',m.summary),el('p','Source observation: '+(m.observed_at||'not received')+(m.stale?' · STALE':''),'muted'))}
+function printerCard(m,p){const card=el('article',undefined,'card');card.append(el('h3',p.name||p.id),el('p',String(p.state||'unknown').toUpperCase(),'badge'+(healthy(m)&&p.available!==false?'':' bad')),el('div',(p.progress??0)+'%','large'),el('p',p.job||p.job_name||'No job reported'));const prog=el('progress');prog.max=100;prog.value=p.progress||0;card.append(prog);label(card,'Time remaining',(p.remaining_minutes??'—')+' min');label(card,'Nozzle / bed',(p.nozzle_c??p.nozzle_temperature??'—')+'°C / '+(p.bed_c??p.bed_temperature??'—')+'°C');if(p.layer)label(card,'Layer',p.layer+' / '+(p.total_layers??'—'));const actions=el('div',undefined,'row actions');const caps=p.capabilities||m.capabilities||[];for(const action of ['pause','resume','stop']){if(caps.includes(action))button(action[0].toUpperCase()+action.slice(1),()=>{if(action==='stop'&&!confirm('Stop this print? This cannot resume the same job.'))return;command(m,action,action==='stop'?{confirm:'STOP'}:{},p.id)},actions,can(m,action)&&p.available!==false)}if(caps.includes('speed')){const select=el('select');[[1,'Silent (50%)'],[2,'Standard (100%)'],[3,'Sport (124%)'],[4,'Ludicrous (166%)']].forEach(([v,t])=>{const option=el('option',t);option.value=v;select.append(option)});select.value=p.speed||2;actions.append(select);button('Set speed',()=>command(m,'speed',{value:Number(select.value)},p.id),actions,can(m,'speed'))}if(caps.includes('light'))button(p.light==='on'?'Light off':'Light on',()=>command(m,'light',{value:p.light==='on'?'off':'on'},p.id),actions,can(m,'light'));if(p.camera_available)button('Camera snapshot',async()=>{try{const response=await fetch(base+'/api/v1/camera/'+encodeURIComponent(p.id),{headers:{Authorization:'Bearer '+reader},cache:'no-store',signal:AbortSignal.timeout(12000)});if(!response.ok)throw Error('Camera unavailable');const image=el('img',undefined,'camera');const url=URL.createObjectURL(await response.blob());image.src=url;image.addEventListener('load',()=>URL.revokeObjectURL(url),{once:true});card.append(image)}catch(e){notice(e.message)}},actions);card.append(actions);if(!caps.length)card.append(el('p',p.control_hint||'Read-only integration. Controls are explicitly enabled in your configuration.','muted'));return card}
+function plexCard(m,parent){const d=m.details||{};for(const stream of d.streams||[]){const row=el('div',undefined,'session');row.append(el('h3',stream.title),el('p',(stream.state||'unknown')+' · '+(stream.player||'Unknown player')));label(row,'Progress',stream.progress==null?'Not reported':stream.progress.toFixed(1)+'%');label(row,'Transcoding',stream.transcoding?'Active':'Not reported active');label(row,'Reserved bandwidth',stream.bandwidth_kbps==null?'Unknown':(stream.bandwidth_kbps/1000).toFixed(2)+' Mbps');if(can(m,'terminate_stream'))button('Stop stream',()=>{if(confirm('Stop this active Plex stream?'))command(m,'terminate_stream',{session_id:stream.id,confirm:'STOP'})},row);parent.append(row)}if(!(d.streams||[]).length)parent.append(el('p','No active streams reported.'));for(const library of d.libraries||[]){const row=el('div',undefined,'row');row.append(el('p',library.name+' · '+library.type+(library.refreshing?' · scanning':'')));button('Refresh library',()=>command(m,'refresh_library',{library_id:library.id}),row,can(m,'refresh_library'));parent.append(row)}if((d.requests||[]).length){parent.append(el('h3','Seerr requests'));for(const request of d.requests){const row=el('div',undefined,'session');row.append(el('p',(request.title||'TMDb '+request.media_id)+' · request status '+request.request_status+' · media status '+request.media_status));if(request.request_status===1&&can(m,'seerr_approve'))button('Approve request',()=>{if(confirm('Approve this media request? It may start a download.'))command(m,'seerr_approve',{request_id:request.id,confirm:'APPROVE'})},row);parent.append(row)}}ensureMediaWorkspace(m)}
+function mediaButton(workspace,m,action,text,callback,parent){
+ const b=button(text,async()=>{if(workspace.busy)return;workspace.busy=true;syncMediaWorkspaces();try{await callback()}finally{workspace.busy=false;syncMediaWorkspaces()}},parent,can(m,action));
+ b.dataset.action=action;return b
+}
+function ensureMediaWorkspace(m){
+ let workspace=mediaWorkspaces.get(m.id);
+ if(!workspace&&(m.capabilities||[]).includes('seerr_search')||!workspace&&m.details?.seerr_available!==undefined){
+  const node=el('section',undefined,'card'),heading=el('h2','Request media · '+m.name),freshness=el('p','','muted'),row=el('div',undefined,'row'),input=el('input'),results=el('div');
+  input.placeholder='Movie or TV title';input.setAttribute('aria-label','Movie or TV title');row.append(input);node.append(heading,freshness,row,results);
+  workspace={node,input,results,freshness,busy:false};mediaWorkspaces.set(m.id,workspace);$('workspaces').append(node);
+  mediaButton(workspace,m,'seerr_search','Search Seerr',async()=>{const receipt=await command(currentModule(m.id)||m,'seerr_search',{query:input.value,page:1});if(receipt?.result?.results&&mediaWorkspaces.get(m.id)===workspace){results.replaceChildren();showSearch(currentModule(m.id)||m,receipt.result.results,results,workspace)}},row);
+ }
+ return workspace
+}
+function syncMediaWorkspaces(){
+ for(const [id,workspace] of mediaWorkspaces){const m=currentModule(id);if(!m){workspace.node.remove();mediaWorkspaces.delete(id);continue}
+  workspace.node.hidden=!(tab==='all'||tab===id);
+  workspace.freshness.textContent='Source observation: '+(m.observed_at||'not received')+(healthy(m)?' · Request state stays open during refreshes.':' · Source unavailable or stale; submission is disabled.');
+  for(const b of workspace.node.querySelectorAll('button[data-action]'))b.disabled=workspace.busy||b.dataset.complete==='true'||!can(m,b.dataset.action);
+ }
+}
+function showSearch(m,results,parent,workspace=mediaWorkspaces.get(m.id)){
+ const area=el('section');area.append(el('h3','Search results'));
+ for(const item of results){const row=el('div',undefined,'session');row.append(el('strong',item.title+' ('+item.media_type+')'),el('p',item.overview||''));
+  mediaButton(workspace,m,'seerr_request','Request',async()=>{const params={media_id:item.id,media_type:item.media_type};
+   if(item.media_type==='tv'){const result=await command(currentModule(m.id)||m,'seerr_tv',{media_id:item.id});if(!result?.result?.seasons)return;
+    const choices=el('div');choices.append(el('p','Choose seasons, then submit:'));const checks=[];
+    for(const season of result.result.seasons){const l=el('label'),c=el('input');c.type='checkbox';c.value=season.number;l.append(c,document.createTextNode(' '+season.name+' '));checks.push(c);choices.append(l)}
+    mediaButton(workspace,m,'seerr_request','Submit selected seasons',async()=>{params.seasons=checks.filter(c=>c.checked).map(c=>Number(c.value));if(!params.seasons.length){notice('Select at least one season.');return}await requestDestination(m,params)},choices);row.append(choices)
+   }else await requestDestination(m,params)
+  },row);area.append(row)
+ }
+ parent.append(area)
+}
+function requestDestination(m,params){
+ m=currentModule(m.id)||m;const workspace=mediaWorkspaces.get(m.id);if(!workspace)return;
+ workspace.confirmation?.remove();
+ const snapshot={...params,...(params.seasons?{seasons:[...params.seasons]}:{})},destinations=m.details?.destinations||[];
+ const panel=el('section',undefined,'session'),heading=el('h3','Confirm media request'),summary=el('p',snapshot.media_type==='tv'?'TV show · selected seasons: '+snapshot.seasons.join(', '):'Movie request');
+ panel.setAttribute('role','group');panel.setAttribute('aria-label','Media request confirmation');
+ panel.append(heading,summary,el('p','Your Seerr approval policy applies. This may start a download.'));
+ const field=el('label','Destination '),select=el('select');select.setAttribute('aria-label','Request destination');
+ if(destinations.length){for(const name of destinations){const option=el('option',name);option.value=name;select.append(option)}select.value=destinations[0]}
+ else{const option=el('option',"Seerr's configured default");option.value='';select.append(option);select.value='';select.disabled=true}
+ field.append(select);panel.append(field);const actions=el('div',undefined,'row actions'),result=el('p','','muted');
+ const submit=mediaButton(workspace,m,'seerr_request','Confirm request',async()=>{
+  const latest=currentModule(m.id),names=latest?.details?.destinations||[];
+  if(!latest||!can(latest,'seerr_request')){notice('Request source is no longer current; refresh before confirming.');return}
+  if((names.length&&!names.includes(select.value))||(!names.length&&select.value)){notice('Destinations changed. Select the seasons or movie again to review the current choices.');return}
+  const payload={...snapshot};if(select.value)payload.destination=select.value;
+  const receipt=await command(latest,'seerr_request',payload);
+  submit.dataset.complete='true';select.disabled=true;
+  result.textContent=receipt?.state==='accepted'?'Seerr recorded this request. Follow its request list for download and availability.':'The request outcome needs review. Check Seerr before creating another request; nothing is resent automatically.';
+  cancel.textContent='Close';
+ },actions);
+ const cancel=button('Cancel',()=>{if(workspace.busy)return;panel.remove();if(workspace.confirmation===panel)workspace.confirmation=null},actions);
+ panel.append(actions,result);workspace.confirmation=panel;workspace.node.append(panel);syncMediaWorkspaces();panel.scrollIntoView?.({block:'nearest',behavior:'smooth'})
+}
+function render(){if(!model)return;$('name').textContent=model.name;$('tabs').replaceChildren();const tabs=[['all','Overview'],...model.modules.map(m=>[m.id,m.name]),['alerts','Health']];for(const [id,name] of tabs)button(name,()=>{tab=id;render()},$('tabs'),true).className='tab'+(tab===id?' active':'');$('content').replaceChildren();const selected=tab==='alerts'?model.modules.filter(m=>!healthy(m)):model.modules.filter(m=>tab==='all'||m.id===tab);if(!selected.length)$('content').append(el('p',tab==='alerts'?'All configured sources are current and responding.':'No enabled modules. Add one to config.json.'));for(const m of selected){const card=el('section',undefined,'card');header(m,card);if((m.details?.printers||[]).length){const grid=el('div',undefined,'grid');for(const p of m.details.printers)grid.append(printerCard(m,p));card.append(grid)}else if(m.type==='plex')plexCard(m,card);else if(m.type==='http_status'){for(const s of m.details?.services||[]){const row=el('div',undefined,'row');row.append(el('p',s.name),el('span',s.available?'ONLINE':'UNAVAILABLE','badge'+(s.available?'':' bad')),el('span',(s.latency_ms??'—')+' ms','muted'));card.append(row)}}$('content').append(card)}syncMediaWorkspaces()}
+async function refresh({background=false}={}){if(!reader)return;try{const first=!lastSuccess;model=await api('/api/v1/modules');lastSuccess=new Date();refreshFailed=false;$('health').className='muted';$('health').textContent='Hub '+model.version+' · Last successful refresh '+lastSuccess.toLocaleTimeString()+' · '+model.modules.length+' sources';if((first||!background)&&activeCommands===0&&messageKind!=='command')notice('Connected. Source observations are shown independently of this page refresh.','connection');render()}catch(e){const message='Dashboard refresh unavailable: '+e.message+'. Last successful refresh: '+(lastSuccess?lastSuccess.toLocaleString():'never')+'. Showing the last view.';refreshFailed=true;$('health').className='badge bad';$('health').textContent=message;syncMediaWorkspaces();if(activeCommands===0&&messageKind!=='command')notice(message,'connection')}}
+$('connect').onclick=()=>{reader=$('reader').value.trim();$('reader').value='';refresh();clearInterval(timer);timer=setInterval(()=>refresh({background:true}),15000)};$('enable').onclick=()=>{controller=$('controller').value.trim();$('controller').value='';if(!reader)reader=controller;refresh()};$('disconnect').onclick=()=>{reader=controller='';model=null;lastSuccess=null;clearInterval(timer);mediaWorkspaces.clear();$('workspaces').replaceChildren();$('reader').value=$('controller').value='';$('tabs').replaceChildren();$('content').replaceChildren();$('health').textContent='';notice('Disconnected. Tokens were cleared from this page.')} ;window.addEventListener('pagehide',()=>{reader=controller=''})
+</script></body></html>

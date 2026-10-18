@@ -1,0 +1,211 @@
+# Kindle setup and Wi-Fi updates
+
+Inkboard's native client is a KOReader plugin. It keeps the dashboard visible,
+supports touch menus, camera snapshots, color on compatible screens, brightness,
+night dimming, remembered landing screens, reduced ghosting, offline snapshots,
+and a local Health panel. Your hub and enabled connectors determine which live
+data and actions are available.
+
+## Before starting
+
+You need an **already jailbroken Kindle** with its required post-jailbreak setup
+complete, scriptlet support (or a compatible KUAL launcher), and the standard
+Kindle build of KOReader installed under `koreader/`. This repository does not exploit, downgrade,
+update or modify Kindle firmware. Check your exact model and firmware against the
+[Kindle Modding Wiki](https://kindlemodding.org/) before choosing a jailbreak.
+Never install a firmware update to try to make this dashboard work.
+
+Use the upstream [KOReader Kindle installation instructions](https://github.com/koreader/koreader/wiki/Installation-on-Kindle-devices)
+and [user guide](https://koreader.rocks/user_guide/). The plugin uses KOReader's
+LuaJIT, LuaSec, CA bundle, image decoder and device APIs. The original device
+implementation was exercised on a Colorsoft with KOReader 2026.07.1; automated
+fixtures do not certify every Kindle model or firmware.
+
+For modern KPM-equipped Kindles, install KOReader with `;kpm update` and
+`;kpm install koreader` in the Kindle search bar, then open its generated launcher
+book (or use `;kpm launch koreader`). Use the upstream instructions for your
+specific jailbreak. The generated Inkboard installer is also a
+[scriptlet](https://kindlemodding.org/kindle-dev/scriptlets.html): a `.sh` file
+in `documents/` that your completed jailbreak indexes as a tappable library book.
+**KUAL is not required for this modern installation path.**
+
+Finish [the hub setup](../README.md) first. For operation away from home, the hub
+needs a DNS name, a trusted TLS certificate and an HTTPS reverse proxy. Forward
+the hub's HTTPS route, **not** the printer, Plex, Arr or Kindle SSH ports. The
+client checks the certificate chain and the configured DNS name. Captive Wi-Fi
+login portals must be completed separately.
+The public client offers only the verified HTTPS route; it does not send the
+dashboard's bearer credentials over a direct HTTP connection.
+
+## 1. Pair this Kindle
+
+Read the **16-character serial** from Kindle Settings → Device Info. Merge these
+fields into your **private** hub `config.json`; use your configured printer IDs.
+Do not edit the checked-in template or commit this file.
+
+```json
+{
+  "public_url": "https://dashboard.example.net/kindle-dashboard",
+  "kindle": {
+    "serial": "YOURDEVICE000001",
+    "printer_ids": ["workshop", "spare"],
+    "timezone": "UTC"
+  }
+}
+```
+
+`YOURDEVICE000001` is a placeholder, not a valid pairing for your device. Replace
+it with the exact uppercase letters/digits from Device Info. `printer_ids` may
+contain zero, one or two IDs. The web hub supports more integrations; direct
+printer-card hit regions on the Kindle are optimized for two selected printers.
+The controls menu can list additional reported printers. The six navigation
+slots are currently fixed: Print, LLM, Site, Plex, Traffic and Alerts. A module
+that is not configured shows an explanation rather than invented data.
+
+From the repository directory, build a fresh private package:
+
+```sh
+python tools/build_kindle.py --config /path/to/private/config.json --secrets /path/to/private/secrets.json --out /path/to/private/kindle-build
+```
+
+PowerShell accepts the same command with Windows paths. The output directory must
+not already exist. The builder makes no network requests, hardware changes or
+provider calls. It reads the hub's separate `reader_token` and `controller_token`
+from its private secrets file; no token is passed on the command line or printed.
+It does not copy printer or Plex credentials into the Kindle package.
+
+**The resulting USB ZIP contains dashboard credentials.** Keep it private, never
+attach it to an issue or release, and delete it after successful pairing. The
+`client_updates` directory contains only the three client files and manifest;
+it does not contain those credentials.
+
+## 2. Install once over USB
+
+1. Exit KOReader. Connect the Kindle over USB.
+2. Extract `inkboard-usb.zip` onto the Kindle's visible storage. Merge the
+   `extensions` directory without replacing existing extensions. You should see
+   `inkboard-install/`, `documents/InstallInkboard.sh` and
+   `extensions/inkboard/` at the storage root.
+3. Eject and disconnect USB. In the Kindle library, tap the **Install Inkboard**
+   book. On older devices with working KUAL, **KUAL → Inkboard → Install
+   Inkboard** runs the same installer.
+4. Open **KOReader → Tools → Inkboard → Start dashboard**.
+5. Tap **Health**. Check the loaded version, Wi-Fi and successful refresh. Open a
+   printer menu and Plex if configured. Then delete `inkboard-install/` from the
+   Kindle, delete the `Install Inkboard` scriptlet, and delete the private USB ZIP
+   from your computer.
+
+If the scriptlet does not appear, check that the post-jailbreak hotfix/scriptlet
+setup is complete using its upstream instructions. An unmodified Kindle cannot
+run the installer by renaming an ordinary book. For an existing authenticated
+root shell, step 3 is equivalent to:
+
+```sh
+/bin/sh /mnt/us/inkboard-install/install.sh
+```
+
+The installer verifies the device serial and package hashes, installs the plugin,
+puts the update helper and tokens in root-owned private storage, and installs a
+KOReader startup recovery patch. Imported USB token files are removed after their
+private copies are verified. It never opens an inbound listener. It refuses to
+overwrite a different existing plugin, helper, recovery patch or credential.
+An identical rerun can finish a copy interrupted between files; if an existing
+file differs, preserve the package and inspect the reported failure instead of
+deleting or overwriting an unknown installation.
+
+Without `--secrets`, the installer still installs the client and update helper.
+Enter the separate tokens using **Tools → Inkboard → Set dashboard token / Set
+control token**. Prefer the private `/var/local` storage. KOReader reports a
+warning if it must use its USB-visible settings directory instead.
+
+## 3. Publish future client updates
+
+For a later release, keep the same serial and public URL and select a higher
+semantic version:
+
+```sh
+python tools/build_kindle.py --config /path/to/private/config.json --version 0.1.1 --out /path/to/private/kindle-build-0.1.1
+```
+
+No `--secrets` is needed for an update. Copy the complete generated
+`client_updates/` directory into your hub's private setup directory, preserving
+this layout:
+
+```text
+client_updates/
+  manifest.json
+  files/0.1.1/
+    _meta.lua
+    main.lua
+    VERSION
+```
+
+Publish **files first, manifest last**. Keep the previous version until the
+Kindle has installed the new one. The hub validates sizes and SHA-256 before
+serving assets; partial publication fails safely and can be retried after fixing
+the publication. The client authenticates to your HTTPS origin, checks the
+device binding, exact three-file allowlist, sizes and hashes, and keeps a verified
+backup. On the Kindle choose **Health → Check for Wi-Fi update** (also available
+under Tools → Inkboard). After installation, exit and reopen KOReader to load the
+new code. USB and home Wi-Fi are unnecessary when your HTTPS hub is reachable.
+
+Ordinary **hub/module/data changes are immediately reflected** by the next
+dashboard refresh and require no client installation. Only native UI/code changes
+need this explicit Wi-Fi update step. Updates are not silently installed or
+forced while you are using the dashboard.
+
+The API2 helper is intentionally fixed: `_meta.lua` remains byte-identical during
+Wi-Fi updates, each file is at most 384 KiB, and the three files together are at
+most 512 KiB. The builder rejects oversized packages. Changing the helper,
+metadata format, serial or trusted origin requires a deliberate migration; do
+not simply raise a server limit. One hub update manifest currently pairs one
+Kindle. Use separate instances for separate device bindings.
+
+## Daily behavior and troubleshooting
+
+| Observation | Check |
+| --- | --- |
+| **Waiting** in Health | This tab has not yet completed a validated refresh in the current KOReader session. |
+| **Offline** | Reconnect Wi-Fi; your last verified image remains timestamped. |
+| **Stale / Check** | Check hub health and that tab's enabled connector; a battery/Wi-Fi observation cannot prove the upstream service is healthy. |
+| **Reopen** | New files are installed, but the current KOReader process still runs the previous version. |
+| **TLS failure** | Check the device clock, certificate DNS name and KOReader CA bundle. Never disable verification to bypass it. |
+| **Reader rejected** | Restore the reader token privately; control access needs the distinct controller token. |
+| **Update recovery unavailable** | The first install did not complete or its private helper/patch changed. Inspect over your existing trusted root shell or reconnect USB. |
+| **Print outcome uncertain** | Check the printer's actual state and saved request receipt; the client never resends an uncertain command automatically. |
+| **Optional module not configured** | Enable and configure a compatible backend. No action was submitted. |
+
+KeepAlive and standby inhibition use the existing KOReader device APIs. In
+**Everyday Kindle settings**, select the preferred landing tab, night dimming
+and refresh/ghosting behavior. Enable **Start dashboard automatically** when
+offered by the dashboard's normal start flow. This starts the dashboard with
+KOReader; the public installer does not change the Kindle's operating-system
+boot services or force KOReader to launch after a full device reboot.
+
+## Optional advanced APIs
+
+The native client retains the original advanced UI implementations, but the
+portable hub's first release does not implement the full private deployment's
+Print Doctor/phone automation, Seerr acquisition pipeline, subtitles, destructive
+media operations or Windows operator telemetry. These menu entry points explain
+their unavailable state by default. For a separately implemented, compatible
+backend, `kindle.features` can enable `doctor`, `media_requests`, `media_operator`,
+`subtitles` or `telemetry`. A feature flag does not install that backend or grant
+it credentials. Do not enable a flag merely to make an unavailable message go
+away. Consult the current integration documentation for supported live actions.
+
+## What the tests establish
+
+The public test suite executes the complete generated client in LuaJIT with
+inert KOReader interfaces, consumes actual disposable HTTP hub responses, checks
+deterministic builds/device binding/TLS configuration/secret separation, and
+exercises the retained API2 update state machine and native-adapter failure
+matrix. It includes interrupted writes, unknown newer files, corrupt backups,
+symlinks, private permissions and lock contention. It does not claim physical
+touch, color brightness, ghosting, Kindle filesystem durability, firmware
+compatibility or real printer command timing from a simulation.
+
+The [KUAL upstream documentation](https://github.com/coplate/KUAL_Booklet/blob/master/MR_THREAD.txt)
+describes the extension menu mechanism. KUAL, KOReader and firmware jailbreak
+components remain separately maintained upstream projects; they are not bundled
+inside Inkboard.

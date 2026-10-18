@@ -1,0 +1,41 @@
+-- Priority1: recover a known interrupted file-atomic dashboard update before
+-- plugin discovery. Normal startup without a journal does no helper loading.
+local result={applied=false,reason="not_needed"}
+local lfs=require("libs/libkoreader-lfs")
+local logger=require("logger")
+local root="/var/local/kindle-printer-dashboard"
+local journal=root .. "/ota-file-recovery.transaction"
+if not lfs.symlinkattributes(journal) then return result end
+local a=lfs.symlinkattributes(root)
+if not a or a.mode~="directory" or a.uid~=0 or a.permissions~="rwx------" then
+    logger.warn("Dashboard OTA recovery: private storage unavailable");result.reason="private_storage";return result
+end
+local path=root .. "/ota-file-recovery.lua"
+a=lfs.symlinkattributes(path)
+if not a or a.mode~="file" or a.uid~=0 or a.permissions~="rw-------" or a.nlink~=1 or a.size<1 or a.size>32768 then
+    logger.warn("Dashboard OTA recovery: helper unavailable");result.reason="helper_unavailable";return result
+end
+local f=io.open(path,"rb")
+if not f then logger.warn("Dashboard OTA recovery: helper unreadable");result.reason="helper_unreadable";return result end
+local source=f:read(32769);f:close()
+if not source or #source>32768 or require("ffi/sha2").sha256(source)~="__INKBOARD_RECOVERY_SHA256__" then
+    logger.warn("Dashboard OTA recovery: helper identity mismatch");result.reason="helper_identity";return result
+end
+local ok,recovered,reason=pcall(function()
+    local module=assert(loadstring(source,"@private-dashboard-file-ota-recovery.lua"))()
+    assert(module.api==2 and type(module.new_native)=="function")
+    local recovery=assert(module.new_native())
+    return recovery:recover()
+end)
+if not ok then
+    logger.warn("Dashboard OTA recovery: transaction preserved after an I/O failure");result.reason="recovery_io_failure"
+elseif recovered~=true then
+    logger.warn("Dashboard OTA recovery: unverified transaction preserved for review");result.reason="recovery_refused"
+elseif type(reason)=="string" and reason:match("_journal_retained$") then
+    logger.warn("Dashboard OTA recovery: package verified; journal cleanup needs review")
+    result.applied=true;result.reason="journal_retained"
+else
+    logger.info("Dashboard OTA recovery: package verified and journal reconciled")
+    result.applied=true;result.reason="reconciled"
+end
+return result

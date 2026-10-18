@@ -1,0 +1,23 @@
+{
+  "id": "websites",
+  "type": "http_status",
+  "name": "My services",
+  "enabled": true,
+  "timeout_seconds": 3,
+  "services": [
+    {
+      "id": "website",
+      "name": "My website",
+      "url": "https://example.com",
+      "path": "/",
+      "expected_status": [200]
+    },
+    {
+      "id": "local-service",
+      "name": "Local service",
+      "url": "http://127.0.0.1:8080",
+      "path": "/health",
+      "expected_status": [200, 204]
+    }
+  ]
+}

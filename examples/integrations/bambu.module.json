@@ -1,0 +1,22 @@
+{
+  "id": "printers",
+  "type": "bambu",
+  "name": "My printers",
+  "enabled": true,
+  "controls_enabled": false,
+  "printers": [
+    {
+      "id": "printer-one",
+      "name": "Workshop P1S",
+      "host": "printer.example.invalid",
+      "serial": "YOURPRINTERSERIAL",
+      "access_code_secret": "printer_one_code",
+      "tls_fingerprint": "REPLACE_WITH_64_HEX_SHA256_CERTIFICATE_FINGERPRINT",
+      "mode": "cloud",
+      "mqtt_port": 8883,
+      "camera_port": 6000,
+      "camera_enabled": true,
+      "timeout_seconds": 4
+    }
+  ]
+}

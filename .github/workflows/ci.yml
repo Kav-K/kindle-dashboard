@@ -1,0 +1,61 @@
+name: Setup and integration checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.11'
+          - os: ubuntu-latest
+            python: '3.13'
+          - os: windows-latest
+            python: '3.13'
+          - os: macos-latest
+            python: '3.13'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Bootstrap with the documented Windows command
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\tools\bootstrap.ps1 -Python python -Bambu
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path (Get-Location) '.venv\Scripts')
+      - name: Bootstrap with the documented macOS/Linux command
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          sh tools/bootstrap.sh --bambu
+          printf '%s\n' "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Install application and inert test dependencies
+        run: python -m pip install ".[bambu,test]" build
+      - name: Full tests with fake integrations
+        run: python -m unittest discover -s tests -v
+        env:
+          PYTHONUTF8: '1'
+      - name: Publication and privacy gate
+        run: python tools/public_audit.py --staged
+      - name: Build distributable source and wheel
+        run: python -m build
+      - name: Fresh wheel install, first run, restart, native build and OTA
+        shell: bash
+        run: python tools/verify_setup.py --wheel-dir dist
+        env:
+          PYTHONUTF8: '1'

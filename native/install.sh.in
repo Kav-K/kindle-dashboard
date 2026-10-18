@@ -1,0 +1,94 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# First install only. Repeated identical packages may finish an interrupted copy.
+# Later client updates use the private file-atomic API2 helper and startup patch.
+set -eu
+umask 077
+fail() { printf '%s\n' "Inkboard install stopped: $1"; exit 1; }
+[ "$(id -u)" = 0 ] || fail 'run from KUAL or a root Kindle shell'
+serial=$(tr -d '\000\r\n' < /proc/usid)
+[ "$serial" = '__INKBOARD_SERIAL__' ] || fail 'this build belongs to another Kindle'
+for path in /mnt/us/inkboard-install /mnt/us/inkboard-install/kindleprinter.koplugin; do
+    [ -d "$path" ] && [ ! -L "$path" ] || fail 'unsafe install folder'
+done
+cd /mnt/us/inkboard-install
+for name in _meta.lua main.lua VERSION; do
+    [ -f "kindleprinter.koplugin/$name" ] && [ ! -L "kindleprinter.koplugin/$name" ] || fail 'unsafe plugin file'
+done
+for name in ota-file-recovery.lua 1-inkboard-file-ota-recovery.lua checksums.sha256; do
+    [ -f "$name" ] && [ ! -L "$name" ] || fail 'unsafe recovery file'
+done
+sha256sum -c checksums.sha256 >/dev/null 2>&1 || fail 'package hash mismatch'
+private=/var/local/kindle-printer-dashboard
+if [ -e "$private" ]; then
+    [ -d "$private" ] && [ ! -L "$private" ] || fail 'unsafe private folder'
+else
+    mkdir "$private"
+fi
+chmod 700 "$private"
+[ ! -e "$private/ota-file-recovery.transaction" ] || fail 'an update needs recovery first'
+plugins=/mnt/us/koreader/plugins
+patches=/mnt/us/koreader/patches
+for path in /mnt/us/koreader "$plugins"; do
+    [ -d "$path" ] && [ ! -L "$path" ] || fail 'install the standard KOReader package first'
+done
+if [ -e "$patches" ]; then
+    [ -d "$patches" ] && [ ! -L "$patches" ] || fail 'unsafe KOReader patches folder'
+else
+    mkdir "$patches"
+fi
+active=$plugins/kindleprinter.koplugin
+# Never overwrite another client, helper, patch or credentials. A rerun is valid
+# only when each already-present destination equals this exact package.
+same_or_absent() {
+    if [ -e "$2" ] || [ -L "$2" ]; then
+        [ -f "$2" ] && [ ! -L "$2" ] && cmp -s "$1" "$2" || fail 'existing file differs; preserve it for inspection'
+    fi
+}
+same_or_absent ota-file-recovery.lua "$private/ota-file-recovery.lua"
+same_or_absent 1-inkboard-file-ota-recovery.lua "$patches/1-inkboard-file-ota-recovery.lua"
+if [ -e "$active" ] || [ -L "$active" ]; then
+    [ -d "$active" ] && [ ! -L "$active" ] || fail 'unsafe existing plugin folder'
+    for path in "$active"/* "$active"/.[!.]* "$active"/..?*; do
+        if [ ! -e "$path" ] && [ ! -L "$path" ]; then continue; fi
+        case "${path##*/}" in
+            _meta.lua|main.lua|VERSION) ;;
+            *) fail 'unexpected existing plugin entry; preserve it for inspection';;
+        esac
+    done
+    for name in _meta.lua main.lua VERSION; do
+        same_or_absent "kindleprinter.koplugin/$name" "$active/$name"
+    done
+fi
+for name in token control-token; do
+    if [ -e "$name" ] || [ -L "$name" ]; then
+        [ -f "$name" ] && [ ! -L "$name" ] || fail 'unsafe credential file'
+        value=$(cat "$name")
+        case "$value" in *[!A-Za-z0-9_-]*|'') fail 'invalid credential format';; esac
+        [ ${#value} -ge 24 ] && [ ${#value} -le 256 ] || fail 'invalid credential length'
+        same_or_absent "$name" "$private/$name"
+    fi
+done
+if [ -f token ] && [ -f control-token ]; then
+    if cmp -s token control-token; then fail 'reader and controller credentials must differ'; fi
+fi
+if [ ! -d "$active" ]; then mkdir "$active"; fi
+for name in _meta.lua main.lua VERSION; do
+    if [ ! -e "$active/$name" ]; then cp "kindleprinter.koplugin/$name" "$active/$name"; fi
+done
+if [ ! -e "$private/ota-file-recovery.lua" ]; then cp ota-file-recovery.lua "$private/ota-file-recovery.lua"; fi
+chmod 600 "$private/ota-file-recovery.lua"
+if [ ! -e "$patches/1-inkboard-file-ota-recovery.lua" ]; then
+    cp 1-inkboard-file-ota-recovery.lua "$patches/1-inkboard-file-ota-recovery.lua"
+fi
+for name in token control-token; do
+    if [ -f "$name" ]; then
+        if [ ! -e "$private/$name" ]; then cp "$name" "$private/$name"; fi
+        chmod 600 "$private/$name"
+        cmp -s "$name" "$private/$name" || fail 'private credential verification failed'
+        rm "$name"
+    fi
+done
+sync
+printf '%s\n' 'Inkboard installed. Open KOReader → Tools → Inkboard → Start dashboard.'
+printf '%s\n' 'Delete inkboard-install and the private USB archive from the computer after checking Health.'

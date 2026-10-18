@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "My remote dashboard",
+  "listen": {"host": "127.0.0.1", "port": 8787},
+  "public_url": "https://dashboard.example.net/kindle-dashboard",
+  "refresh_seconds": 15,
+  "stale_after_seconds": 90,
+  "modules": [
+    {"id": "printers", "type": "bambu", "name": "Home printers", "enabled": true, "remote": true},
+    {"id": "media", "type": "plex", "name": "Home Plex", "enabled": true, "remote": true}
+  ]
+}

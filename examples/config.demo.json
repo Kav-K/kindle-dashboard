@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "name": "My dashboard",
+  "listen": {"host": "127.0.0.1", "port": 8787},
+  "public_url": "https://dashboard.example.net/kindle-dashboard",
+  "refresh_seconds": 15,
+  "stale_after_seconds": 60,
+  "modules": [{"id": "demo", "type": "demo", "name": "Demo printers", "enabled": true}],
+  "kindle": {"serial": "EXAMPLE012345678", "printer_ids": ["demo-one", "demo-two"], "timezone": "UTC", "features": {"doctor": false, "media_requests": false, "media_operator": false, "subtitles": false, "telemetry": false}}
+}

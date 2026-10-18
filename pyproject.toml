@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inkboard-dashboard"
+version = "0.1.0"
+description = "A private, modular e-paper dashboard for printers, media and services"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+dependencies = ["Pillow>=10.4,<13", "tzdata>=2024.1; sys_platform == 'win32'"]
+
+[project.optional-dependencies]
+bambu = ["paho-mqtt>=2.1,<3"]
+test = ["lupa>=2.5,<3"]
+
+[project.scripts]
+inkboard = "inkboard.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+inkboard = ["web.html"]

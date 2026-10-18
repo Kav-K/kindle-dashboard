@@ -1,0 +1,331 @@
+-- Dashboard file-atomic OTA; private journal plus one complete retained backup.
+-- Loading this module performs no I/O. api2 never renames the active directory.
+local M = { api = 2 }
+local SERIAL = '__INKBOARD_SERIAL__'
+local PRIVATE = '/var/local/kindle-printer-dashboard'
+local JOURNAL = PRIVATE .. '/ota-file-recovery.transaction'
+local LOCK = PRIVATE .. '/ota-file-recovery.lock'
+local FILES = { '_meta.lua', 'main.lua', 'VERSION' }
+local ROOTS = {
+    ['/mnt/us/koreader/plugins'] = true,
+    ['/mnt/base-us/koreader/plugins'] = true,
+    ['/mnt/us/kmc/kpm/packages/koreader/koreader/plugins'] = true,
+    ['/mnt/base-us/kmc/kpm/packages/koreader/koreader/plugins'] = true,
+}
+local function version(v)
+    if type(v) ~= 'string' or #v > 32 then return nil end
+    local a,b,c = v:match('^(%d+)%.(%d+)%.(%d+)%-dev$')
+    local dev=true
+    if not a then a,b,c = v:match('^(%d+)%.(%d+)%.(%d+)$');dev=false end
+    if not a or #a>4 or #b>4 or #c>4 then return nil end
+    return {tonumber(a),tonumber(b),tonumber(c),dev}
+end
+local function newer(a,b)
+    local av,bv=version(a),version(b)
+    if not av or not bv then return false end
+    for i=1,3 do if av[i]~=bv[i] then return av[i]>bv[i] end end
+    return bv[4] and not av[4]
+end
+local function hashes(v)
+    if type(v) ~= 'table' then return false end
+    local n=0
+    for k,x in pairs(v) do
+        if (k ~= '_meta.lua' and k ~= 'main.lua' and k ~= 'VERSION')
+            or type(x) ~= 'string' or #x ~= 64 or not x:match('^[0-9a-f]+$') then return false end
+        n=n+1
+    end
+    return n == 3
+end
+local function valid(r)
+    if type(r) ~= 'table' or r.serial ~= SERIAL or not ROOTS[r.parent]
+        or not newer(r.new_version,r.old_version) or not hashes(r.old) or not hashes(r.new)
+        or type(r.stage) ~= 'string' then return false end
+    local prefix='kindleprinter.ota-stage-' .. r.new_version .. '-'
+    local suffix=r.stage:sub(#prefix+1)
+    if r.stage:sub(1,#prefix) ~= prefix or #suffix > 19
+        or not suffix:match('^[1-9]%d*%-%d%d%d%d%d%d$') then return false end
+    if r.backup ~= 'kindleprinter.ota-backup-' .. r.old_version .. '-' .. suffix
+        or r.old['_meta.lua'] ~= r.new['_meta.lua'] then return false end
+    local count=0
+    for k in pairs(r) do
+        if not ({serial=true,parent=true,old_version=true,new_version=true,stage=true,backup=true,old=true,new=true})[k] then return false end
+        count=count+1
+    end
+    return count == 8
+end
+local function encode(r)
+    if not valid(r) then return nil end
+    return table.concat({'KOTA2',r.serial,r.parent,r.old_version,r.new_version,r.stage,r.backup,
+        r.old['_meta.lua'],r.old['main.lua'],r.old.VERSION,r.new['_meta.lua'],r.new['main.lua'],r.new.VERSION},'\n') .. '\n'
+end
+local function decode(raw)
+    if type(raw) ~= 'string' or #raw > 2048 or raw:find('[%z\r]') or raw:sub(-1) ~= '\n' then return nil end
+    local lines={}
+    for v in raw:gmatch('([^\n]*)\n') do lines[#lines+1]=v end
+    if #lines ~= 13 or lines[1] ~= 'KOTA2' then return nil end
+    local r={serial=lines[2],parent=lines[3],old_version=lines[4],new_version=lines[5],stage=lines[6],backup=lines[7],
+        old={['_meta.lua']=lines[8],['main.lua']=lines[9],VERSION=lines[10]},
+        new={['_meta.lua']=lines[11],['main.lua']=lines[12],VERSION=lines[13]}}
+    return valid(r) and r or nil
+end
+M.encode=encode
+M.decode=decode
+
+function M.new(io)
+    local self={}
+    local function identity() return io.private_ready() and io.serial()==SERIAL end
+    local function exact(path,wanted,wanted_version)
+        local p=io.package(path)
+        if type(p)~='table' or p.version~=wanted_version or not hashes(p.hashes) then return false end
+        for _,name in ipairs(FILES) do if p.hashes[name]~=wanted[name] then return false end end
+        return true
+    end
+    local function state()
+        local raw,why=io.read_journal()
+        if raw==nil then return nil,why or 'absent' end
+        local r=decode(raw)
+        if not r then return nil,'invalid_journal' end
+        return r,nil,raw
+    end
+    local function clear(raw,reason)
+        if not io.sync_packages() or not io.clear_journal_if_equal(raw) then return true,reason..'_journal_retained' end
+        return true,reason
+    end
+    local function recover_locked()
+        local r,why,raw=state()
+        if not r then return why=='absent',why end
+        local active=r.parent..'/kindleprinter.koplugin'
+        if exact(active,r.old,r.old_version) then
+            if not exact(r.parent..'/'..r.backup,r.old,r.old_version) then return false,'predecessor_unverified' end
+            return clear(raw,'predecessor_intact')
+        end
+        if exact(active,r.new,r.new_version) then
+            if not exact(r.parent..'/'..r.backup,r.old,r.old_version) then return false,'predecessor_unverified' end
+            return clear(raw,'target_intact')
+        end
+        local pack=io.package(active)
+        if type(pack)~='table' or not hashes(pack.hashes) or pack.hashes['_meta.lua']~=r.old['_meta.lua']
+            or (pack.hashes['main.lua']~=r.old['main.lua'] and pack.hashes['main.lua']~=r.new['main.lua'])
+            or (pack.hashes.VERSION~=r.old.VERSION and pack.hashes.VERSION~=r.new.VERSION) then
+            return false,'unknown_active_preserved'
+        end
+        local backup=r.parent..'/'..r.backup
+        if not exact(backup,r.old,r.old_version) then return false,'predecessor_unverified' end
+        -- Recognized mixtures only: restore main atomically; VERSION is last.
+        for _,name in ipairs({'main.lua','VERSION'}) do
+            local allowed={[r.old[name]]=true,[r.new[name]]=true}
+            if not io.replace_from(backup..'/'..name,active..'/'..name,r.old[name],allowed) then
+                return false,'rollback_incomplete_preserved'
+            end
+        end
+        if not io.sync_packages() or not exact(active,r.old,r.old_version) then return false,'rollback_verification' end
+        return clear(raw,'predecessor_restored')
+    end
+    local function locked(operation)
+        if not identity() then return false,'private_storage_or_identity' end
+        local lock=io.acquire_lock()
+        if not lock then return false,'update_busy_or_lock_unavailable' end
+        local ok,result,reason=pcall(operation)
+        local released=io.release_lock(lock)
+        if not ok then return false,'unexpected_io_failure_journal_preserved' end
+        if not released then return false,'lock_release_unverified' end
+        return result,reason
+    end
+    function self:recover() return locked(recover_locked) end
+    function self:install(r)
+        return locked(function()
+            if not valid(r) then return false,'invalid_transaction' end
+            local previous,why=io.read_journal()
+            if previous~=nil or why~='absent' then return false,'journal_exists_or_unreadable' end
+            local active=r.parent..'/kindleprinter.koplugin'
+            local stage=r.parent..'/'..r.stage
+            local backup=r.parent..'/'..r.backup
+            if not exact(active,r.old,r.old_version) or not exact(stage,r.new,r.new_version)
+                or io.exists(backup) then return false,'package_changed' end
+            -- Interrupted backup copies cannot affect active and are never
+            -- confused with a complete predecessor. Every attempt is unique.
+            if not io.copy_package(active,backup,r.old) or not exact(backup,r.old,r.old_version)
+                or not io.sync_packages() then return false,'backup_failed_active_unchanged' end
+            -- Recheck active and stage after the copy, before durable admission.
+            if not exact(active,r.old,r.old_version) or not exact(stage,r.new,r.new_version) then
+                return false,'package_changed_before_journal'
+            end
+            local raw=encode(r)
+            if not io.write_journal_exclusive(raw) or io.read_journal()~=raw then
+                return false,'journal_write_active_unchanged'
+            end
+            local changed=true
+            for _,name in ipairs({'main.lua','VERSION'}) do
+                if not io.replace_from(stage..'/'..name,active..'/'..name,r.new[name],{[r.old[name]]=true}) then
+                    changed=false;break
+                end
+            end
+            if changed and io.sync_packages() and exact(active,r.new,r.new_version) then
+                return clear(raw,'installed')
+            end
+            local _,reason=recover_locked()
+            return false,'activation_failed_'..(reason or 'recovery_unverified')
+        end)
+    end
+    return self
+end
+
+function M.new_native()
+    local lfs=require('libs/libkoreader-lfs')
+    local sha256=require('ffi/sha2').sha256
+    local ffi=require('ffi')
+    pcall(ffi.cdef, [[int open(const char *, int, ...); long write(int,const void *,unsigned long); int fsync(int); int close(int); void sync(void); int flock(int,int);]])
+    if ffi.os~='Linux' then return nil,'unsupported_platform' end
+    local directory,nofollow
+    if ffi.arch=='arm' or ffi.arch=='arm64' then directory,nofollow=16384,32768
+    elseif ffi.arch=='x86' or ffi.arch=='x64' then directory,nofollow=65536,131072
+    else return nil,'unsupported_architecture' end
+    local function attrs(path) return lfs.symlinkattributes(path) end
+    local function private_ready()
+        local a=attrs(PRIVATE)
+        return a and a.mode=='directory' and a.uid==0 and a.permissions=='rwx------' or false
+    end
+    local function read(path,maximum,private)
+        local a=attrs(path)
+        if not a or a.mode~='file' or a.size<1 or a.size>maximum
+            or private and (a.uid~=0 or a.permissions~='rw-------' or a.nlink~=1) then return nil end
+        local f=io.open(path,'rb');if not f then return nil end
+        local raw=f:read(maximum+1);f:close()
+        return raw and #raw<=maximum and raw or nil
+    end
+    local function public_directory(path)
+        local current=''
+        for part in path:gmatch('[^/]+') do
+            current=current..'/'..part
+            local a=attrs(current)
+            if not a or a.mode~='directory' then return false end
+        end
+        return true
+    end
+    local function sync_private()
+        local fd=ffi.C.open(PRIVATE,directory+nofollow+524288)
+        if fd<0 then return false end
+        local ok=ffi.C.fsync(fd)==0
+        return ffi.C.close(fd)==0 and ok
+    end
+    local function create(path,body,private)
+        local fd=ffi.C.open(path,1+64+128+nofollow+524288,ffi.cast('unsigned int',384))
+        if fd<0 then return false end
+        local offset=0
+        while offset<#body do
+            local n=tonumber(ffi.C.write(fd,body:sub(offset+1),#body-offset))
+            if not n or n<=0 then break end;offset=offset+n
+        end
+        local synced=not private or ffi.C.fsync(fd)==0
+        local closed=ffi.C.close(fd)==0
+        if offset~=#body or not synced or not closed then
+            -- This exclusive creator owns this temporary/backup file. Never
+            -- remove an existing destination or recursively delete anything.
+            os.remove(path);return false
+        end
+        return true
+    end
+    local function nonce() return tostring(os.time())..'-'..tostring(math.random(100000,999999)) end
+    local adapter={}
+    adapter.private_ready=private_ready
+    adapter.serial=function()
+        local f=io.open('/proc/usid','rb');if not f then return nil end
+        local raw=f:read(129);f:close()
+        if not raw or #raw>128 then return nil end
+        local serial=raw:gsub('[%z\r\n]+$','')
+        return serial==SERIAL and serial or nil
+    end
+    adapter.exists=function(path) return attrs(path)~=nil end
+    adapter.acquire_lock=function()
+        if not private_ready() then return nil end
+        local old=attrs(LOCK)
+        if old and (old.mode~='file' or old.uid~=0 or old.permissions~='rw-------' or old.nlink~=1) then return nil end
+        local fd=ffi.C.open(LOCK,2+64+nofollow+524288,ffi.cast('unsigned int',384))
+        if fd<0 then return nil end
+        local a=attrs(LOCK)
+        local ok,locked=pcall(function() return ffi.C.flock(fd,6) end) -- EX|NB.
+        if not a or a.mode~='file' or a.uid~=0 or a.permissions~='rw-------' or a.nlink~=1 or not ok or locked~=0 then
+            ffi.C.close(fd);return nil
+        end
+        return fd
+    end
+    adapter.release_lock=function(fd)
+        local ok,result=pcall(function() return ffi.C.flock(fd,8) end) -- UN.
+        return ffi.C.close(fd)==0 and ok and result==0
+    end
+    adapter.read_journal=function()
+        if not private_ready() then return nil,'private_storage' end
+        if not attrs(JOURNAL) then return nil,'absent' end
+        local raw=read(JOURNAL,2048,true)
+        if raw then return raw end
+        return nil,'journal_unreadable'
+    end
+    adapter.package=function(path)
+        if not public_directory(path) then return nil end
+        local count=0
+        for name in lfs.dir(path) do
+            if name~='.' and name~='..' then
+                if name~='_meta.lua' and name~='main.lua' and name~='VERSION' then return nil end
+                count=count+1
+            end
+        end
+        if count~=3 then return nil end
+        local result={hashes={}};local total=0
+        for _,name in ipairs(FILES) do
+            local raw=read(path..'/'..name,384*1024,false)
+            if not raw then return nil end
+            total=total+#raw;if total>512*1024 then return nil end
+            result.hashes[name]=sha256(raw)
+            if name=='VERSION' then result.version=raw:match('^([^\r\n]+)\r?\n?$') end
+        end
+        return result
+    end
+    adapter.sync_packages=function() return pcall(function() ffi.C.sync() end) end
+    adapter.copy_package=function(from,to,manifest)
+        local parent=to:match('^(.*)/[^/]+$')
+        if not ROOTS[parent] or not public_directory(parent) or attrs(to) or not lfs.mkdir(to) then return false end
+        for _,name in ipairs(FILES) do
+            local raw=read(from..'/'..name,384*1024,false)
+            if not raw or sha256(raw)~=manifest[name] or not create(to..'/'..name,raw,false) then return false end
+        end
+        return adapter.sync_packages()
+    end
+    adapter.write_journal_exclusive=function(raw)
+        -- The private flock is held by every caller until install/recovery
+        -- completes. No cooperating updater can replace or clear this journal.
+        if not private_ready() or attrs(JOURNAL) then return false end
+        local temporary=JOURNAL..'.new-'..nonce()
+        if not create(temporary,raw,true) then return false end
+        if attrs(JOURNAL) or not os.rename(temporary,JOURNAL) then os.remove(temporary);return false end
+        return sync_private() and read(JOURNAL,2048,true)==raw
+    end
+    adapter.clear_journal_if_equal=function(raw)
+        if not private_ready() or read(JOURNAL,2048,true)~=raw then return false end
+        return os.remove(JOURNAL) and sync_private() or false
+    end
+    adapter.replace_from=function(from,to,wanted,allowed)
+        local active_parent=to:match('^(.*)/kindleprinter%.koplugin/[^/]+$')
+        local name=to:match('[^/]+$')
+        if not ROOTS[active_parent] or (name~='main.lua' and name~='VERSION')
+            or not public_directory(active_parent..'/kindleprinter.koplugin') then return false end
+        local raw=read(from,384*1024,false)
+        if not raw or sha256(raw)~=wanted then return false end
+        local temporary=active_parent..'/kindleprinter.ota-file-'..nonce()
+        if not create(temporary,raw,false) or not adapter.sync_packages() then return false end
+        if sha256(read(temporary,384*1024,false) or '')~=wanted then return false end
+        local current=read(to,384*1024,false)
+        if not current or not allowed[sha256(current)] then os.remove(temporary);return false end
+        -- POSIX file replacement is atomic on the tested FSP filesystem.
+        -- The active directory, metadata and existing main are never removed.
+        -- The private flock serializes this module's updaters. Do not perform
+        -- a simultaneous manual MTP/SSH write to the same active files.
+        if not os.rename(temporary,to) then os.remove(temporary);return false end
+        return adapter.sync_packages() and sha256(read(to,384*1024,false) or '')==wanted
+    end
+    if not private_ready() or adapter.serial()~=SERIAL then return nil,'private_storage_or_identity' end
+    local lock=adapter.acquire_lock()
+    if not lock then return nil,'update_busy_or_lock_unavailable' end
+    if not adapter.release_lock(lock) then return nil,'lock_release_unverified' end
+    return M.new(adapter)
+end
+return M
