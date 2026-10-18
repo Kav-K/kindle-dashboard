@@ -21,8 +21,14 @@ import time
 import uuid
 
 ROOT=Path(__file__).resolve().parents[1]
+PHASE='arguments'
+class VerificationFailure(RuntimeError):
+    def __init__(self, reason):
+        self.reason=reason
+        super().__init__('Clean setup step failed')
 
 def main():
+    global PHASE
     parser=argparse.ArgumentParser(description=__doc__)
     wheel=parser.add_mutually_exclusive_group()
     wheel.add_argument('--wheel',type=Path,help='Install this wheel; otherwise install the source checkout')
@@ -42,15 +48,20 @@ def main():
         def run(command,expected=0,timeout=120):
             p=subprocess.run(list(map(str,command)),cwd=work,env=env,capture_output=True,timeout=timeout)
             if p.returncode!=expected:
-                raise RuntimeError('Setup subprocess failed: '+str(command[0])+' (no private output disclosed)')
+                raise VerificationFailure('subprocess_exit_'+str(p.returncode))
             return p
+        PHASE='create_virtualenv'
         run([sys.executable,'-m','venv',venv])
         runtime=venv/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+        PHASE='install_package'
         run([runtime,'-m','pip','install',str(package)],timeout=180)
+        PHASE='initialize_demo'
         run([runtime,'-m','inkboard','init','--directory',setup,'--demo'])
         credentials=json.loads((setup/'secrets.json').read_bytes())
         initial_secret_hash=hashlib.sha256((setup/'secrets.json').read_bytes()).hexdigest()
+        PHASE='check_demo'
         run([runtime,'-m','inkboard','check','--directory',setup])
+        PHASE='refuse_repeat_init'
         run([runtime,'-m','inkboard','init','--directory',setup,'--demo'],expected=2)
         assert hashlib.sha256((setup/'secrets.json').read_bytes()).hexdigest()==initial_secret_hash
         checks.append('fresh install, offline check and non-overwriting repeat setup')
@@ -82,14 +93,16 @@ def main():
             process=subprocess.Popen([str(runtime),'-m','inkboard','serve','--directory',str(setup),'--port',str(port)],cwd=work,env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=log)
             deadline=time.monotonic()+20
             while time.monotonic()<deadline:
-                if process.poll() is not None:raise RuntimeError('Owned demo server exited before readiness')
+                if process.poll() is not None:raise VerificationFailure('server_exit_'+str(process.returncode))
                 try:
                     if get('/healthz')[0]==200:return
                 except (OSError,http.client.HTTPException):pass
                 time.sleep(.1)
-            raise RuntimeError('Owned demo server did not become ready')
+            raise VerificationFailure('readiness_timeout')
         try:
+            PHASE='start_server'
             start()
+            PHASE='browser_and_auth'
             status,page=get('/')
             assert status==200 and b'Inkboard' in page
             assert all(value.encode() not in page for value in credentials.values())
@@ -101,6 +114,7 @@ def main():
             status,png=get('/dashboard.png',credentials['reader_token'])
             assert status==200 and png[:8]==b'\x89PNG\r\n\x1a\n' and struct.unpack('>II',png[16:24])==(1264,1680)
             checks.append('real authenticated HTTP, role separation and rendered dashboard PNG')
+            PHASE='restart_server'
             stop();start()
             assert get('/api/v1/printers',credentials['reader_token'])[0]==200
             assert hashlib.sha256((setup/'secrets.json').read_bytes()).hexdigest()==initial_secret_hash
@@ -110,13 +124,16 @@ def main():
                 kindle={'serial':'DEMO123456789012','printer_ids':['demo-one','demo-two'],'timezone':'UTC'})
             # This private synthetic profile is never installed on a physical device.
             (setup/'config.json').write_text(json.dumps(config)+'\n',encoding='utf-8')
+            PHASE='check_kindle_profile'
             run([runtime,'-m','inkboard','check','--directory',setup])
             output=work/'paired-build'
+            PHASE='build_kindle'
             run([runtime,ROOT/'tools/build_kindle.py','--config',setup/'config.json','--secrets',setup/'secrets.json','--out',output])
             manifest=json.loads((output/'client_updates/manifest.json').read_bytes())
             assert manifest['device_serial']=='DEMO123456789012'
             assert {row['name'] for row in manifest['files']}=={'main.lua','VERSION','_meta.lua'}
             shutil.copytree(output/'client_updates',setup/'client_updates')
+            PHASE='retrieve_ota_assets'
             status,raw=get('/api/client-update/manifest',credentials['reader_token'])
             assert status==200 and json.loads(raw)==manifest
             for row in manifest['files']:
@@ -132,5 +149,6 @@ def main():
 if __name__=='__main__':
     try:raise SystemExit(main())
     except (AssertionError,RuntimeError,OSError,subprocess.SubprocessError) as error:
-        print('Clean setup verification failed ('+type(error).__name__+'). No private subprocess output disclosed.',file=sys.stderr)
+        reason=error.reason if isinstance(error,VerificationFailure) else type(error).__name__
+        print('Clean setup verification failed at '+PHASE+' ('+reason+'). No private subprocess output disclosed.',file=sys.stderr)
         raise SystemExit(1)
