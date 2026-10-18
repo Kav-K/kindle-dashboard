@@ -30,12 +30,18 @@ No proprietary authentication keys or signed-client impersonation are included.
   file that validates that printer's serial-number certificate.
 - Install optional MQTT support into the **same Python environment** as Inkboard:
 
-```text
-python -m pip install ".[bambu]"
+```powershell
+# Windows PowerShell, from the checkout
+.\.venv\Scripts\python.exe -m pip install ".[bambu]"
 ```
 
-Run that command from the repository root after activating the quickstart's
-virtual environment. Pillow, used to validate camera JPEGs, is a normal dashboard
+```sh
+# macOS / Linux, from the checkout
+.venv/bin/python -m pip install '.[bambu]'
+```
+
+This step is already complete if you used bootstrap's `-Bambu` / `--bambu`
+option. Pillow, used to validate camera JPEGs, is a normal dashboard
 dependency. No Bambu cloud login is required or collected.
 
 ## 1. Discover and verify TLS identity
@@ -43,8 +49,14 @@ dependency. No Bambu cloud login is required or collected.
 On a trusted LAN, verify the printer IP on the physical printer and in your
 router, then run this credential-free probe from the repository root:
 
-```text
-python examples/integrations/inspect_printer_certificate.py PRINTER_IP
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\python.exe .\examples\integrations\inspect_printer_certificate.py PRINTER_IP
+```
+
+```sh
+# macOS / Linux
+.venv/bin/python examples/integrations/inspect_printer_certificate.py PRINTER_IP
 ```
 
 It performs a TLS handshake and prints a SHA256 fingerprint. It sends **no access
@@ -71,6 +83,11 @@ the `modules` array in your **private** configuration. Replace the hostname,
 serial and fingerprint. Save the access code as the private secret named
 `printer_one_code` using the quickstart's secret command; the module contains
 only `"access_code_secret": "printer_one_code"`.
+
+Use the [executable and private-directory conventions](README.md#edit-the-generated-setup-not-the-repository-examples)
+for the commands below. This example's printer ID is `printer-one`; select that
+same ID in `kindle.printer_ids` when building the Kindle client. Do not use the
+module ID `printers` or the printer serial in that field.
 
 ```text
 inkboard set-secret --directory PRIVATESETUP --name printer_one_code

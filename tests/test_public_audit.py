@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import tempfile
+import shutil
 import subprocess
 import unittest
 
@@ -36,6 +37,21 @@ class PublicationAudit(unittest.TestCase):
         count,issues=audit.audit(ROOT)
         self.assertGreater(count,15)
         self.assertEqual(issues,[])
+
+    def test_only_exact_reviewed_photo_is_approved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);path=root/'docs/images/inkboard-colorsoft.jpg'
+            path.parent.mkdir(parents=True)
+            shutil.copyfile(ROOT/'docs/images/inkboard-colorsoft.jpg',path)
+            self.assertEqual(audit.audit(root),(1,[]))
+            path.write_bytes(path.read_bytes()+b'unreviewed metadata')
+            self.assertEqual(audit.audit(root),(1,[('docs/images/inkboard-colorsoft.jpg','unapproved-binary-asset')]))
+
+    def test_unlisted_binary_image_still_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);path=root/'another.jpg'
+            shutil.copyfile(ROOT/'docs/images/inkboard-colorsoft.jpg',path)
+            self.assertEqual(audit.audit(root),(1,[('another.jpg','unexpected-binary')]))
 
     def test_staged_secret_cannot_hide_behind_clean_worktree(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -111,6 +111,24 @@ class BuildTests(unittest.TestCase):
                 with self.assertRaises(BuildError) as caught: build(profile(), Path(tmp) / "out", secrets=secrets)
                 self.assertNotIn("x" * 43, str(caught.exception))
 
+    def test_kindles_use_hub_compatible_url_safe_token_subset(self):
+        from inkboard.config import valid_role_token
+        for length in (32, 43, 256):
+            tokens = {"reader_token": "r" * (length - 2) + "_-", "controller_token": "c" * length}
+            self.assertTrue(all(valid_role_token(value) for value in tokens.values()))
+            with tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "package"
+                build(profile(), output, secrets=tokens)
+                self.assertEqual((output / "usb/inkboard-install/token").read_text().strip(), tokens["reader_token"])
+        for reader in ("r" * 31, "r" * 257, "r" * 32 + "!", "r" * 32 + "\"", "r" * 32 + "$"):
+            with tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "package"
+                with self.subTest(length=len(reader)), self.assertRaises(BuildError) as error:
+                    build(profile(), output, secrets={"reader_token": reader, "controller_token": "c" * 43})
+                self.assertIn("32–256", str(error.exception))
+                self.assertNotIn(reader, str(error.exception))
+                self.assertFalse(output.exists())
+
     def test_cli_errors_do_not_echo_credential_or_source_fragments(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp) / "config.json"; bad = Path(tmp) / "private.json"
@@ -128,7 +146,7 @@ except ImportError:
     HARNESS = None
 
 
-@unittest.skipIf(HARNESS is None, "Install requirements-dev.txt for full LuaJIT contract tests")
+@unittest.skipIf(HARNESS is None, "Install .[test] for full LuaJIT contract tests")
 class NativeContracts(unittest.TestCase):
     def setUp(self):
         self.files, self.helper, _ = render_client(profile())
@@ -423,7 +441,7 @@ end end''')
         for item in built["files"]:
             connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
             try:
-                connection.request("GET", "/kindle-dashboard/api/client-update/file/0.1.0/" + item["name"],
+                connection.request("GET", "/kindle-dashboard/api/client-update/file/" + built["version"] + "/" + item["name"],
                                    headers={"Authorization": "Bearer " + self.secrets["reader_token"]})
                 response = connection.getresponse(); raw = response.read()
                 self.assertEqual(response.status, 200)

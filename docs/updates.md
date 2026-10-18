@@ -15,7 +15,14 @@ git pull --ff-only
 .venv/bin/inkboard check --directory ~/.config/inkboard/home
 ```
 
-Windows uses `.venv\Scripts\python.exe` and its own private directory. Keep the
+```powershell
+# Windows PowerShell, from the checkout
+git pull --ff-only
+.\.venv\Scripts\python.exe -m pip install ".[bambu]"
+.\.venv\Scripts\inkboard.exe check --directory "$env:LOCALAPPDATA\Inkboard\home"
+```
+
+Run only the block for your platform. Keep the
 extras you actually use. Restart the hub with the same directory, verify Health
 and source timestamps, and confirm reader/controller roles still behave properly.
 Bootstrap is a first-run command; it intentionally refuses to replace `.venv`.
@@ -26,7 +33,8 @@ First install the paired package and root-owned recovery helper as described in
 [Kindle setup](kindle.md). Later client updates need no USB:
 
 1. Build a new client with the same public URL, device serial, selected printer
-   IDs and helper identity. Use an increasing version such as `0.1.1`.
+   IDs and helper identity. Use a version higher than the currently installed and
+   published version, for example `0.1.2` after `0.1.1`.
 2. Retain your current `client_updates` as a private rollback reference. Publish
    the new generated assets as the guide describes, preserving complete files
    and a manifest that refers only to verified assets.
@@ -40,8 +48,9 @@ detect corruption; your hub is the trusted update authority. Protect its code,
 credentials and update directory accordingly. A compromised trusted hub can
 supply new client code.
 
-The USB zip can contain the one-time credential handoff. **Never publish it** to
-GitHub Releases or a public web directory. Only the generated token-free update
+The USB zip and generated `usb/` tree can contain the one-time credential
+handoff. **Never publish either** to GitHub Releases or a public web directory;
+delete both after successful first pairing. Only the generated token-free update
 assets belong on the authenticated hub. This release supports one paired native
 client per hub update endpoint. Use separate hub instances for different native
 serials/profiles.

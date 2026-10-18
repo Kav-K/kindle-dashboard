@@ -94,13 +94,13 @@ def _tokens(secrets: dict | None) -> dict[str, str]:
         raise BuildError("Secrets must be a JSON object")
     reader = values.get("reader_token", values.get("reader"))
     controller = values.get("controller_token", values.get("control_token", values.get("controller")))
-    if any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{24,256}", value)
+    if any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", value)
            for value in (reader, controller)) or reader == controller:
-        raise BuildError("Secrets need separate reader and controller tokens (24–256 URL-safe characters)")
+        raise BuildError("Kindle needs distinct reader and controller tokens of 32–256 characters using A–Z, a–z, 0–9, _ or -. Initialized hub tokens already comply; use set-secret to replace incompatible custom tokens on the hub before rebuilding and re-pairing clients.")
     return {"token": reader, "control-token": controller}
 
 
-def render_client(config: dict, version: str = "0.1.0") -> tuple[dict[str, bytes], bytes, dict]:
+def render_client(config: dict, version: str = "0.1.1") -> tuple[dict[str, bytes], bytes, dict]:
     profile = validate_profile(config)
     if not isinstance(version, str) or not re.fullmatch(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:-dev)?", version):
         raise BuildError("Version must be x.y.z or x.y.z-dev")
@@ -129,7 +129,7 @@ def render_client(config: dict, version: str = "0.1.0") -> tuple[dict[str, bytes
     return files, recovery, manifest
 
 
-def build(config: dict, output: Path, version: str = "0.1.0", secrets: dict | None = None) -> dict:
+def build(config: dict, output: Path, version: str = "0.1.1", secrets: dict | None = None) -> dict:
     profile = validate_profile(config)
     token_files = _tokens(secrets)
     files, recovery, manifest = render_client(config, version)
@@ -196,7 +196,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--version", default="0.1.0")
+    parser.add_argument("--version", default="0.1.1")
     parser.add_argument("--secrets", type=Path, help="Private hub secrets JSON; values are never printed")
     args = parser.parse_args()
     try:

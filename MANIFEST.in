@@ -1,5 +1,6 @@
 include LICENSE README.md SECURITY.md CONTRIBUTING.md THIRD_PARTY_NOTICES.md
 recursive-include docs *.md
+include docs/images/inkboard-colorsoft.jpg
 recursive-include examples *.json *.example *.py
 recursive-include native *.in *.lua *.py *.md
 recursive-include tools *.py *.sh *.ps1

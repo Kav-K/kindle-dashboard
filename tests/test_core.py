@@ -83,6 +83,16 @@ class SetupTests(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 initialize(Path(temporary), demo=True)
 
+    def test_invalid_name_does_not_reserve_directory_and_retry_works(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "new private setup"
+            for name in ("", "x" * 81, None):
+                with self.subTest(name=name), self.assertRaises(ConfigError):
+                    initialize(home, name=name)
+                self.assertFalse(home.exists())
+            initialize(home, name="Valid retry")
+            self.assertEqual(load(home)[0]["name"], "Valid retry")
+
     def test_default_setup_is_offline_valid(self):
         from inkboard.cli import check_setup
         with tempfile.TemporaryDirectory() as temporary:
@@ -91,10 +101,11 @@ class SetupTests(unittest.TestCase):
             self.assertTrue(check_setup(*load(home)))
 
     def test_unexpected_schema_and_inline_nested_credentials_rejected(self):
-        for mutation in (lambda c: c.update(schema_version=2), lambda c: c.update(extra=True),
+        for mutation in (lambda c: c.update(schema_version=2), lambda c: c.update(schema_version=True), lambda c: c.update(extra=True),
                          lambda c: c["modules"][0].update(token="private"), lambda c: c["modules"][0].update(seerr={"api_key": "private"}),
                          lambda c: c.update(refresh_seconds=True), lambda c: c.update(stale_after_seconds=5),
-                         lambda c: c["listen"].update(host="example.invalid")):
+                         lambda c: c["listen"].update(host="example.invalid"), lambda c: c["listen"].update(host=[]),
+                         lambda c: c["modules"][0].update(type=[]), lambda c: c["modules"][0].update(remote="false")):
             value = config()
             mutation(value)
             with self.subTest(value=value), self.assertRaises(ConfigError):

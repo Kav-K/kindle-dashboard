@@ -49,14 +49,14 @@ def integer(value, low: int, high: int, label: str) -> int:
 
 
 def validate(config: dict) -> dict:
-    if config.get("schema_version") != 1 or set(config) - TOP_KEYS:
+    if type(config.get("schema_version")) is not int or config["schema_version"] != 1 or set(config) - TOP_KEYS:
         raise ConfigError("Unknown configuration schema or keys")
     if not isinstance(config.get("name"), str) or not 1 <= len(config["name"]) <= 80:
         raise ConfigError("name must contain 1 to 80 characters")
     listen = config.get("listen", {})
     if not isinstance(listen, dict) or set(listen) != {"host", "port"}:
         raise ConfigError("listen requires host and port")
-    if listen["host"] not in {"127.0.0.1", "::1", "0.0.0.0"}:
+    if not isinstance(listen["host"], str) or listen["host"] not in {"127.0.0.1", "::1", "0.0.0.0"}:
         raise ConfigError("listen.host must be a loopback address or explicit 0.0.0.0")
     integer(listen["port"], 1, 65535, "listen.port")
     integer(config.get("refresh_seconds"), 5, 3600, "refresh_seconds")
@@ -80,10 +80,12 @@ def validate(config: dict) -> dict:
         if module["id"] in ids:
             raise ConfigError("Module ids must be unique")
         ids.add(module["id"])
-        if module.get("type") not in MODULE_TYPES:
+        if not isinstance(module.get("type"), str) or module["type"] not in MODULE_TYPES:
             raise ConfigError("Unsupported module type")
         if type(module.get("enabled", True)) is not bool:
             raise ConfigError("enabled must be true or false")
+        if type(module.get("remote", False)) is not bool:
+            raise ConfigError("remote must be true or false")
         if not isinstance(module.get("name", module["id"]), str) or len(module.get("name", "")) > 80:
             raise ConfigError("Module names must be short strings")
         # Configurations contain secret *references*. Values belong in secrets.json.
@@ -163,12 +165,13 @@ def initialize(directory: Path, *, demo: bool = False, name: str = "My dashboard
     directory = directory.expanduser().absolute()
     if directory.exists():
         raise ConfigError("Setup directory must be new; existing setup is never overwritten")
-    private_directory(directory)
     config = {"schema_version": 1, "name": name, "listen": {"host": "127.0.0.1", "port": 8787},
               "public_url": "", "refresh_seconds": 15, "stale_after_seconds": 60,
               "modules": [{"id": "demo", "type": "demo", "name": "Demo printers", "enabled": True}] if demo else
                          [{"id": "health", "type": "alerts", "name": "Dashboard health", "enabled": True}]}
     validate(config)
+    # Bad wizard/CLI input must not reserve an unusable setup directory.
+    private_directory(directory)
     credentials = {role: secrets.token_urlsafe(32) for role in ("reader_token", "controller_token", "ingest_token")}
     write_private(directory / "config.json", config)
     write_private(directory / "secrets.json", credentials)

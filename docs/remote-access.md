@@ -19,7 +19,7 @@ client builds pin the chosen hostname, URL prefix and device serial. A different
 Wi-Fi does not require rebuilding when the public URL stays the same.
 
 The native client requires an ordinary trusted certificate covering that DNS
-name and standard HTTPS port443. It does not accept a bare IP address or ignore
+name and standard HTTPS port 443. It does not accept a bare IP address or ignore
 certificate failures. The Kindle's clock must also be correct.
 
 ## Option A: Caddy and a reachable public address
@@ -39,6 +39,11 @@ requirements are met. Follow its [HTTPS quick start](https://caddyserver.com/doc
 and [reverse proxy guide](https://caddyserver.com/docs/quick-starts/reverse-proxy).
 Run Caddy and the hub under their normal service managers; opening terminals
 manually is useful for testing but does not survive a reboot.
+
+Install Caddy on the same host as Inkboard for the loopback address above to
+reach it. Use Caddy's installation and firewall requirements for your platform;
+automatic certificate issuance can also require port 80 or an explicitly
+configured DNS challenge. The Caddyfile is not a reason to expose port 8787.
 
 Do not strip `/kindle-dashboard` in this example. The hub accepts that prefix
 itself. Keep the Authorization header intact and do not cache authenticated
@@ -101,6 +106,13 @@ would need an explicit client integration. Never disable the hub's tokens.
 Do not put a token in a test URL. Prefer the browser sign-in or a local script
 that reads it from the private setup directory into an HTTP header.
 
+For step 3, request
+`https://YOUR_DOMAIN/kindle-dashboard/api/v1/modules` in a private browser window
+without signing in: it must return HTTP **401**, rather than module data. The
+public sign-in shell and `/healthz` are intentionally reachable without a token.
+If the shell returns a Host-header error, confirm `public_url`, restart your hub,
+and ensure the reverse proxy preserves the configured public hostname.
+
 ## Separate collector and hub computers
 
 The portable collector can send snapshots outbound to a remote HTTPS hub:
@@ -121,6 +133,10 @@ Provision this explicitly:
 2. Add its local integration objects and secrets using their guides. On the
    hub, configure matching IDs/types/names with `"remote": true`; the hub does
    not need the source's printer/Plex credentials.
+   [`config.remote-hub.json`](../examples/config.remote-hub.json) shows the hub
+   shape; keep the hub's generated `secrets.json`, replace its module list and
+   public URL deliberately, and restart that owned hub. Do not mark the source
+   computer's local integration objects `remote`.
 3. On the hub's trusted terminal, run
    `inkboard show-token --directory PRIVATE_HUB --role ingest`. Transfer that
    value privately to the collector's hidden prompt:
@@ -131,6 +147,11 @@ Provision this explicitly:
 4. Run the collect command above once with `--once`. Check that it succeeds and
    the hub shows a new source timestamp, then use the continuous command and
    the collector startup template. A failed one-shot exits nonzero.
+
+Use the installed `.venv` executables from the quickstart on **both** machines.
+Install the Bambu extra on the machine that contacts printers; a telemetry-only
+remote hub does not need printer dependencies. Stop the foreground collector
+with Ctrl+C before registering its startup service to avoid duplicate polling.
 
 **This release's split collector is telemetry-only.** It cannot grant remote
 command capabilities. For working controls, keep the hub's adapter on a machine

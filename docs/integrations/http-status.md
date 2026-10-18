@@ -5,6 +5,12 @@ into the private configuration's `modules` array. Replace each URL and choose a
 stable path. This is a lightweight availability check for sites, local services
 and a self-hosted status API; it does not need printer or media dependencies.
 
+Keep the generated top-level fields and health module when adding this object;
+see the [complete configuration example](README.md#edit-the-generated-setup-not-the-repository-examples).
+Run your installed `inkboard check --directory PRIVATESETUP` first, then add
+`--connect` for the explicit read-only network test. Start or restart your owned
+hub after saving the configuration.
+
 ```json
 {
   "id": "services",

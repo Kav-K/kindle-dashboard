@@ -1,5 +1,11 @@
 # Plex and optional Seerr
 
+Use the quickstart's installed [executable and private-directory conventions](README.md#edit-the-generated-setup-not-the-repository-examples)
+for the `inkboard` / `PRIVATESETUP` commands below. The browser supports the media
+actions in this guide. The public Kindle client displays Plex and Now Playing
+observations; its advanced media action menus require a separately compatible
+backend and remain disabled by default.
+
 ## Plex setup
 
 Run Inkboard on a computer that can reach your Plex Media Server. Use the server's
@@ -23,6 +29,20 @@ Copy [`plex.module.json`](../../examples/integrations/plex.module.json) into
 the private `modules` array. Replace `url` with your Plex address. **Remove the
 entire `seerr` object** if you do not run Seerr. Plex itself does not require
 Seerr, Sonarr, Radarr, Shelfarr, an ebook stack or Docker.
+
+Check the private setup offline, then check read-only connectivity before
+starting the hub:
+
+```text
+inkboard check --directory PRIVATESETUP
+inkboard check --directory PRIVATESETUP --connect
+inkboard serve --directory PRIVATESETUP
+```
+
+Sign in with the reader token to inspect data. For actions, expand the browser's
+**Operator controls** and provide the separate controller token; the reader token
+alone cannot refresh libraries, stop streams or submit/approve requests. Restart
+your owned hub after editing its configuration or saving a new integration key.
 
 Start Inkboard and confirm that its Plex view lists the right libraries. Start
 playback in your ordinary Plex client and check its title, state, progress,
@@ -94,6 +114,11 @@ drive letters. Requests can select only configured names, not arbitrary paths.
 Do not use a movie destination for TV or vice versa. If you omit destinations,
 Seerr's configured defaults apply. An unplugged drive or an invalid root folder
 must be fixed in the media stack before requests will complete.
+
+The example lists both a movie and TV destination. Remove any destination you do
+not use. The current browser presents configured names without a media-type
+filter, so use unmistakable names and choose the matching one when confirming a
+request. The adapter sends only that allowlisted destination's settings.
 
 Seerr itself decides auto-approval from the authenticating account's permissions.
 Inkboard neither impersonates another user nor sets `ignoreQuota`. If you want

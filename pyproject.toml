@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inkboard-dashboard"
-version = "0.1.0"
+version = "0.1.1"
 description = "A private, modular e-paper dashboard for printers, media and services"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"

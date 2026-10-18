@@ -91,4 +91,4 @@ for name in token control-token; do
 done
 sync
 printf '%s\n' 'Inkboard installed. Open KOReader → Tools → Inkboard → Start dashboard.'
-printf '%s\n' 'Delete inkboard-install and the private USB archive from the computer after checking Health.'
+printf '%s\n' 'After checking Health, delete inkboard-install from the Kindle and both inkboard-usb.zip and its unpacked usb/ folder from the computer.'

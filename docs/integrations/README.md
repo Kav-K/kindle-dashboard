@@ -19,6 +19,72 @@ only in the private secrets file using the quickstart's hidden prompt, never in
 module JSON or a Git commit. Keys ending `_secret` are references to entries in
 that file.
 
+## Edit the generated setup, not the repository examples
+
+The non-demo `init` command starts with a single `alerts` module and no device
+connections. Keep that module and add your chosen integration objects alongside
+it, separated by commas. For example, this is a complete status-only setup:
+
+```json
+{
+  "schema_version": 1,
+  "name": "My dashboard",
+  "listen": {"host": "127.0.0.1", "port": 8787},
+  "public_url": "",
+  "refresh_seconds": 15,
+  "stale_after_seconds": 60,
+  "modules": [
+    {"id": "health", "type": "alerts", "name": "Dashboard health", "enabled": true},
+    {
+      "id": "websites", "type": "http_status", "name": "My website", "enabled": true,
+      "timeout_seconds": 3,
+      "services": [{"id": "website", "name": "Website", "url": "https://example.com", "path": "/", "expected_status": [200]}]
+    }
+  ]
+}
+```
+
+Replace `https://example.com` before the connection check. Keep the generated
+`secrets.json`; replacing it with a module example would discard your role tokens.
+An empty `public_url` works for the local browser test. Set your real HTTPS URL
+before remote access or a Kindle build. Save JSON as UTF-8 and do not add comments
+or trailing commas. Restart your owned hub after config or secret changes.
+
+Use the executables installed by the quickstart; shell activation is optional:
+
+| Platform | Executable, from the checkout | Private directory |
+| --- | --- | --- |
+| Windows PowerShell | `.\.venv\Scripts\inkboard.exe` | `"$env:LOCALAPPDATA\Inkboard\home"` |
+| macOS / Linux | `.venv/bin/inkboard` | `~/.config/inkboard/home` |
+
+In the integration guides, `inkboard` means that executable and `PRIVATESETUP`
+means your private directory. Run `check` first, then `check --connect`, then
+`serve`. The first check validates without contacting providers; the second is
+an explicit read-only network test. No check starts prints or submits media.
+
+## Reader and operator sign-in
+
+`init` generates three distinct role tokens. Keep them separate:
+
+| Role | Use |
+| --- | --- |
+| `reader` | Browser/Kindle observations, camera snapshots and client downloads |
+| `controller` | Enabled device actions and alert acknowledgement/quiet-hour changes; can also read |
+| `ingest` | A separately configured outbound collector only; cannot read or operate devices |
+
+Use `show-token --directory PRIVATESETUP --role reader` on your trusted terminal
+to sign in to the browser. To operate a configured source, display the separate
+`controller` token, expand **Operator controls**, paste it there and select
+**Enable controls**. Supplying a controller token does not enable actions left
+disabled in `config.json`. Disconnect clears tokens from page memory; reloading
+or closing the page requires signing in again. Keep terminal output private.
+
+The browser/API supports the integration actions listed in the individual
+guides. The Kindle uses dedicated native contracts: printer controls and read-only
+Plex observations are available, while the public client does not yet bridge
+every browser media action. See [Kindle feature boundaries](../kindle.md#optional-advanced-apis)
+before enabling an advanced native menu.
+
 The dashboard stores selected fields rather than whole provider responses. A
 failure in one module leaves the other modules running and retains the previous
 timestamped view. Availability does not imply that control authorization works.

@@ -6,6 +6,7 @@ names only, never matched contents.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 from pathlib import Path
 import re
 import subprocess
@@ -14,6 +15,11 @@ import sys
 SKIP={'.git','.venv','build','dist','out','kindle-out','device-package','__pycache__','.pytest_cache'}
 BAD_SUFFIX={'.key','.p12','.pfx','.sqlite','.sqlite3','.db','.zip','.7z','.log'}
 BAD_NAMES={'secrets.json','.env','authorized_keys','known_hosts','id_rsa','id_ed25519'}
+# Only this reviewed, EXIF/IPTC-free README photo may bypass UTF-8 scanning.
+# A different image or any changed bytes require a deliberate new review/pin.
+APPROVED_BINARY={
+ 'docs/images/inkboard-colorsoft.jpg':('ffa00d3d5d4da957bc736695961dd715f8b801a09be578f00fb9f0fb4d1d07c0',157688),
+}
 RULES={
  'private-key':re.compile(r'-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----'),
  'github-token':re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,})\b'),
@@ -51,6 +57,11 @@ def audit(root: Path, staged: bool = False):
             issues.append((rel,'runtime-directory'))
         raw=path.read_bytes()
         if len(raw)>2_000_000:issues.append((rel,'oversized-source'));continue
+        if rel in APPROVED_BINARY:
+            expected,size=APPROVED_BINARY[rel]
+            if len(raw)!=size or hashlib.sha256(raw).hexdigest()!=expected:
+                issues.append((rel,'unapproved-binary-asset'))
+            continue
         try:text=raw.decode('utf-8')
         except UnicodeError:issues.append((rel,'unexpected-binary'));continue
         for name,rule in RULES.items():

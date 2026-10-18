@@ -1,5 +1,12 @@
 # Inkboard · Kindle Dashboard
 
+<p align="center">
+  <img src="docs/images/inkboard-colorsoft.jpg" alt="Inkboard on a wall-mounted Kindle Colorsoft, showing two printing Bambu printers with camera previews and color status cards" width="560">
+</p>
+
+*A customized Colorsoft installation. The photo includes optional private
+integrations, such as Print Doctor, that are not bundled in this public edition.*
+
 A configurable, self-hosted dashboard for a jailbroken Kindle running KOReader,
 with a browser interface for setup and everyday use. Connect only what you need:
 Bambu printers, Plex/Seerr, or HTTP service checks. Credentials and device
@@ -46,13 +53,17 @@ checks do not measure website visits. See the [feature and testing boundaries](d
 
 Install **Git** and **Python 3.11+**. No administrator access, printer, Plex account,
 Kindle or domain is needed for this first check.
+Confirm `python --version` on Windows or `python3 --version` on macOS/Linux
+before starting. On Windows, install Python with its command available on PATH;
+if `python` opens the Microsoft Store or selects an older interpreter, pass
+`-Python 'C:\path\to\Python\python.exe'` to `bootstrap.ps1`.
 
 ### Windows PowerShell
 
 ```powershell
 git clone https://github.com/Kav-K/kindle-dashboard.git
 cd kindle-dashboard
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\bootstrap.ps1 -Bambu
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\bootstrap.ps1
 .\.venv\Scripts\inkboard.exe init --directory "$env:LOCALAPPDATA\Inkboard\demo" --demo
 .\.venv\Scripts\inkboard.exe serve --directory "$env:LOCALAPPDATA\Inkboard\demo"
 ```
@@ -62,7 +73,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\bootstrap.ps1 -Bambu
 ```sh
 git clone https://github.com/Kav-K/kindle-dashboard.git
 cd kindle-dashboard
-sh tools/bootstrap.sh --bambu
+sh tools/bootstrap.sh
 .venv/bin/inkboard init --directory ~/.config/inkboard/demo --demo
 .venv/bin/inkboard serve --directory ~/.config/inkboard/demo
 ```
@@ -70,8 +81,13 @@ sh tools/bootstrap.sh --bambu
 Open **http://127.0.0.1:8787/kindle-dashboard/**. In another terminal in the checkout, explicitly
 display your demo's reader token and paste it into the page's local sign-in form:
 
+```powershell
+# Windows, in a second PowerShell window in the checkout
+.\.venv\Scripts\inkboard.exe show-token --directory "$env:LOCALAPPDATA\Inkboard\demo" --role reader
+```
+
 ```sh
-# macOS/Linux; on Windows use .\.venv\Scripts\inkboard.exe and your directory.
+# macOS/Linux, in a second terminal in the checkout
 .venv/bin/inkboard show-token --directory ~/.config/inkboard/demo --role reader
 ```
 
@@ -82,6 +98,17 @@ application to make room.
 
 `init` refuses to overwrite an existing setup. To resume later, use `serve`, not
 `init` again. Bootstrap similarly preserves an existing `.venv`.
+
+The demo needs no Bambu dependency. If you plan to connect Bambu printers, use
+`bootstrap.ps1 -Bambu` or `sh tools/bootstrap.sh --bambu` on the initial install.
+For an existing environment, install the optional connector with
+`.\.venv\Scripts\python.exe -m pip install '.[bambu]'` on Windows or
+`.venv/bin/python -m pip install '.[bambu]'` on macOS/Linux.
+
+If dependency downloads fail during bootstrap, the environment is preserved.
+After resolving the network error, use that environment's Python to run
+`-m pip install .` (or `-m pip install '.[bambu]'`) from the checkout. Do not
+rerun `init` over a setup you already created.
 
 ## 2. Connect your own modules
 
@@ -101,21 +128,41 @@ Edit its `config.json` and add only the modules you want. Integration
 secrets are named references to `secrets.json`; the config does not contain the
 values. Set them through a hidden prompt:
 
+```powershell
+# Windows
+.\.venv\Scripts\inkboard.exe set-secret --directory "$env:LOCALAPPDATA\Inkboard\home" --name plex_token
+```
+
 ```sh
-.venv/bin/inkboard set-secret --directory ~/.config/inkboard/home --name plex-key
+# macOS/Linux
+.venv/bin/inkboard set-secret --directory ~/.config/inkboard/home --name plex_token
 ```
 
 Then run an offline check, followed by an explicit read-only connection test:
 
+```powershell
+# Windows
+.\.venv\Scripts\inkboard.exe check --directory "$env:LOCALAPPDATA\Inkboard\home"
+.\.venv\Scripts\inkboard.exe check --directory "$env:LOCALAPPDATA\Inkboard\home" --connect
+.\.venv\Scripts\inkboard.exe serve --directory "$env:LOCALAPPDATA\Inkboard\home"
+```
+
 ```sh
+# macOS/Linux
 .venv/bin/inkboard check --directory ~/.config/inkboard/home
 .venv/bin/inkboard check --directory ~/.config/inkboard/home --connect
 .venv/bin/inkboard serve --directory ~/.config/inkboard/home
 ```
 
-Windows uses the equivalent `.venv\Scripts\inkboard.exe` commands and the chosen
-`$env:LOCALAPPDATA\Inkboard\home` directory. Keep the setup directory outside
-the repository. Each integration guide includes a complete module example,
+Use the **home setup's** reader token to sign in; the demo has different tokens.
+For browser controls, display the home setup's token with `show-token ... --role
+controller` and use the page's operator sign-in. Reader credentials allow viewing;
+they do not authorize printer/media actions. The Kindle package pairs these roles
+privately during its build. Plex/Seerr requests and operator features in this
+edition are available through the browser/API; see the
+[browser versus Kindle feature table](docs/testing.md#supported-surfaces).
+
+Keep the setup directory outside the repository. Each integration guide includes a complete module example,
 credential locations, controls, limitations and troubleshooting:
 
 - [Bambu printers](docs/integrations/bambu.md)
@@ -134,7 +181,9 @@ Follow the [Kindle first-run guide](docs/kindle.md), in order:
    USB package with `tools/build_kindle.py` using your private config/secrets files.
 5. Install the package as instructed, then open Inkboard in KOReader.
 6. Publish only the generated token-free `client_updates` directory to your hub
-   for later authenticated Wi-Fi updates. Keep the credential-bearing USB zip private.
+   for later authenticated Wi-Fi updates. Both `inkboard-usb.zip` and the unpacked
+   `usb/` build directory contain credentials: keep them private and delete both
+   after successful pairing, following the first-run guide.
 
 This project does not jailbreak a Kindle or install Amazon firmware. There is
 no universal safe jailbreak command for every current Kindle. Do not update its
@@ -158,12 +207,22 @@ actual device before creating a new command.
 
 ## Development and verification
 
+```powershell
+# Windows, after bootstrap
+.\.venv\Scripts\python.exe -m pip install -e '.[bambu,test]' build
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe tools/public_audit.py
+.\.venv\Scripts\python.exe -m build
+.\.venv\Scripts\python.exe tools/verify_setup.py --wheel-dir dist
+```
+
 ```sh
-python -m pip install -e '.[bambu,test]' build
-python -m unittest discover -s tests -v
-python tools/public_audit.py
-python -m build
-python tools/verify_setup.py --wheel-dir dist
+# macOS/Linux, after bootstrap
+.venv/bin/python -m pip install -e '.[bambu,test]' build
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python tools/public_audit.py
+.venv/bin/python -m build
+.venv/bin/python tools/verify_setup.py --wheel-dir dist
 ```
 
 The final command creates a fresh virtual environment, installs the actual
