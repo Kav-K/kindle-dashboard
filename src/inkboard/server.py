@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import socket
+from socketserver import TCPServer
 import threading
 from urllib.parse import parse_qs, urlsplit
 
@@ -29,6 +30,12 @@ class Server(ThreadingHTTPServer):
         self.hub, self.directory = hub, directory
         self.slots = threading.BoundedSemaphore(16)
         super().__init__(address, Handler)
+
+    def server_bind(self):
+        # HTTPServer.server_bind calls getfqdn before listen. Reverse DNS is
+        # unnecessary for a numeric bind address and can stall offline startup.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):

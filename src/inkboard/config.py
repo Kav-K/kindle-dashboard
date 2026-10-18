@@ -20,6 +20,16 @@ class ConfigError(ValueError):
     pass
 
 
+def valid_role_token(value) -> bool:
+    """Role credentials must survive HTTP headers and constant-time comparison.
+
+    Visible ASCII excludes spaces, every control character, DEL and non-ASCII.
+    Keep integration credentials separate: their provider may use another format.
+    """
+    return (isinstance(value, str) and 32 <= len(value) <= 512
+            and all(33 <= ord(char) <= 126 for char in value))
+
+
 def read_json(path: Path, max_bytes: int = MAX_CONFIG_BYTES) -> dict:
     if path.is_symlink() or not path.is_file() or path.stat().st_size > max_bytes:
         raise ConfigError("Expected a bounded, regular JSON file")
@@ -178,8 +188,8 @@ def load(directory: Path) -> tuple[dict, dict]:
     if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise ConfigError("secrets.json must have mode 0600 (chmod 600)")
     tokens = [credentials.get(role) for role in ("reader_token", "controller_token", "ingest_token")]
-    if any(not isinstance(value, str) or not 32 <= len(value) <= 512 for value in tokens) or len(set(tokens)) != 3:
-        raise ConfigError("Three distinct reader, controller and ingest tokens of at least 32 characters are required")
+    if any(not valid_role_token(value) for value in tokens) or len(set(tokens)) != 3:
+        raise ConfigError("Three distinct role tokens of 32 to 512 visible ASCII characters, without spaces or control characters, are required")
     if any(not isinstance(k, str) or not isinstance(v, str) or len(v) > 8192 for k, v in credentials.items()):
         raise ConfigError("Secrets must be bounded string values")
     return config, credentials

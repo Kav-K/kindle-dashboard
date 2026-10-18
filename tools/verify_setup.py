@@ -90,15 +90,18 @@ def main():
             finally:c.close()
         def start():
             nonlocal process
-            process=subprocess.Popen([str(runtime),'-m','inkboard','serve','--directory',str(setup),'--port',str(port)],cwd=work,env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=log)
+            process=subprocess.Popen([str(runtime),'-u','-m','inkboard','serve','--directory',str(setup),'--port',str(port)],cwd=work,env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=log)
             deadline=time.monotonic()+20
+            last_status=None;last_error=None
             while time.monotonic()<deadline:
                 if process.poll() is not None:raise VerificationFailure('server_exit_'+str(process.returncode))
                 try:
-                    if get('/healthz')[0]==200:return
-                except (OSError,http.client.HTTPException):pass
+                    last_status=get('/healthz')[0]
+                    if last_status==200:return
+                except (OSError,http.client.HTTPException) as error:last_error=type(error).__name__
                 time.sleep(.1)
-            raise VerificationFailure('readiness_timeout')
+            reason='http_'+str(last_status) if last_status is not None else last_error or 'no_response'
+            raise VerificationFailure('readiness_timeout_'+reason)
         try:
             PHASE='start_server'
             start()

@@ -130,7 +130,7 @@ def main(argv=None):
         if args.command == "set-secret":
             import getpass
             import os
-            from .config import ID, write_private, check_private_access
+            from .config import ID, write_private, check_private_access, valid_role_token
             if not ID.fullmatch(args.name):
                 raise ConfigError("Use a short lowercase secret name")
             if args.name in {"reader_token", "controller_token", "ingest_token"}:
@@ -140,8 +140,8 @@ def main(argv=None):
             value = getpass.getpass("Secret value (hidden): ")
             if not 1 <= len(value) <= 8192 or any(ord(c) < 32 for c in value):
                 raise ConfigError("Secret must be a nonempty single-line value")
-            if args.name in {"reader_token", "controller_token", "ingest_token"} and (not 32 <= len(value) <= 512 or value in {v for k, v in credentials.items() if k != args.name}):
-                raise ConfigError("Role tokens require 32 to 512 characters and must be distinct")
+            if args.name in {"reader_token", "controller_token", "ingest_token"} and (not valid_role_token(value) or value in {v for k, v in credentials.items() if k != args.name}):
+                raise ConfigError("Role tokens require 32 to 512 visible ASCII characters without spaces or control characters, and must be distinct")
             credentials[args.name] = value
             temporary = directory / (".secrets-" + __import__("secrets").token_hex(8) + ".tmp")
             try:
